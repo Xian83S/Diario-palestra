@@ -10,6 +10,7 @@ Diario di allenamento da installare su iPhone: si apre dall'icona sulla Home, a 
 | `index.html` | La pagina dell'app con i meta tag per la modalità app su iPhone |
 | `style.css` | Grafica: tema chiaro e scuro automatico, font Barlow / Barlow Condensed |
 | `app.js` | Interfaccia: Oggi, Schede, Progressi, Storico, backup |
+| `model.js` | Versione del modello dati e migrazione automatica dei dati vecchi (usata al caricamento e all'importazione dei backup) |
 | `storage.js` | Livello di accesso ai dati (`load`, `savePlans`, `saveSession`, `deleteSession`, …). Oggi usa la memoria del telefono (localStorage). È l'unico file da sostituire per passare in futuro a un servizio esterno |
 | `sw.js` | Service worker: salva i file dell'app sul telefono per l'uso offline |
 | `manifest.webmanifest` | Nome, icone e modalità `standalone` dell'app |
@@ -55,6 +56,15 @@ iOS può cancellare i dati dei siti e delle app web che non usi per un po' di te
 - **Storico** → **Esporta dati** → nel foglio di condivisione scegli **Salva in File** (per esempio in iCloud Drive). Viene creato un file `diario-palestra-AAAA-MM-GG.json`.
 - Per recuperare i dati, anche su un altro telefono: **Storico** → **Importa backup** → scegli il file. L'importazione **unisce** i dati: un allenamento o una scheda con lo stesso identificativo viene sostituito, e il resto si aggiunge.
 - L'app mostra la data dell'ultimo backup e la evidenzia se sono passati più di 14 giorni.
+
+## Versione dei dati
+
+Il formato dei dati ha un numero di versione (`Model.DATA_VERSION` in `model.js`), che viene scritto anche nei backup esportati.
+
+- **Versione 1:** ogni esercizio di una scheda aveva `sets`, `reps` e `weight` unici (es. 4 serie da 8 a 60 kg).
+- **Versione 2:** ogni serie ha le proprie ripetizioni e il proprio peso: `sets: [{reps: 10, weight: 55}, {reps: 8, weight: 60}, …]`.
+
+All'apertura l'app converte da sola le schede vecchie: 4×8 a 60 kg diventa 4 serie identiche da 8 a 60 kg. Prima della conversione salva una copia delle schede originali (`diarioPalestra.plans.v1`). Le sessioni già registrate non vengono toccate. Anche i backup vecchi, compresi quelli senza numero di versione, vengono convertiti all'importazione. Un backup creato da una versione più recente dell'app viene rifiutato.
 
 ## Pubblicare una modifica
 

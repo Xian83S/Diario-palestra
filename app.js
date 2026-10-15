@@ -61,18 +61,20 @@ const state = {
 };
 
 /* ---------- Esempi ---------- */
+// Ogni serie è [ripetizioni, kg]; same() crea serie identiche.
+const same = (n, reps, kg) => Array.from({ length: n }, () => [reps, kg]);
 const EXAMPLE_PLANS = [
   { name: 'Push', exercises: [
-    ['Panca piana', 4, 8, 60], ['Spinte manubri panca inclinata', 3, 10, 22], ['Lento avanti manubri', 3, 10, 16],
-    ['Alzate laterali', 3, 12, 8], ['Push down ai cavi', 3, 12, 25],
+    ['Panca piana', [[10, 55], [8, 60], [8, 60], [6, 65]]], ['Spinte manubri panca inclinata', same(3, 10, 22)],
+    ['Lento avanti manubri', [[10, 14], [10, 16], [8, 16]]], ['Alzate laterali', same(3, 12, 8)], ['Push down ai cavi', same(3, 12, 25)],
   ] },
   { name: 'Pull', exercises: [
-    ['Trazioni', 4, 6, 0], ['Rematore bilanciere', 4, 8, 50], ['Lat machine', 3, 10, 45],
-    ['Face pull', 3, 15, 15], ['Curl bilanciere', 3, 10, 25],
+    ['Trazioni', same(4, 6, 0)], ['Rematore bilanciere', [[10, 45], [8, 50], [8, 50], [6, 55]]], ['Lat machine', same(3, 10, 45)],
+    ['Face pull', same(3, 15, 15)], ['Curl bilanciere', same(3, 10, 25)],
   ] },
   { name: 'Gambe', exercises: [
-    ['Squat', 4, 6, 80], ['Stacco rumeno', 3, 8, 70], ['Pressa', 3, 10, 120],
-    ['Leg curl', 3, 12, 35], ['Calf raise', 4, 12, 40],
+    ['Squat', [[8, 70], [6, 80], [6, 80], [5, 85]]], ['Stacco rumeno', same(3, 8, 70)], ['Pressa', same(3, 10, 120)],
+    ['Leg curl', same(3, 12, 35)], ['Calf raise', same(4, 12, 40)],
   ] },
 ];
 
@@ -284,6 +286,11 @@ function renderSummary() {
     <button type="button" class="btn primary big block" data-action="summary-close">Chiudi</button>`;
 }
 
+/** Serie previste di una scheda -> serie dell'allenamento in corso (stringhe, non fatte). */
+function planSetsToDraft(sets) {
+  return sets.map(s => ({ kg: fmtKgInput(s.weight), reps: s.reps ? String(s.reps) : '', done: false }));
+}
+
 function startWorkout(planId) {
   if (state.draft) return toast('C\'è già un allenamento in corso.');
   const plan = state.plans.find(p => p.id === planId);
@@ -295,7 +302,7 @@ function startWorkout(planId) {
     createdAt: new Date().toISOString(),
     exercises: plan ? plan.exercises.map(ex => ({
       name: ex.name,
-      sets: Array.from({ length: Math.max(1, ex.sets | 0) }, () => ({ kg: fmtKgInput(ex.weight), reps: ex.reps ? String(ex.reps) : '', done: false })),
+      sets: planSetsToDraft(ex.sets),
     })) : [],
   };
   state.summary = null;
@@ -311,7 +318,7 @@ function addDraftExercise(name) {
   const fromPlan = state.plans.flatMap(p => p.exercises).find(e => norm(e.name) === norm(name));
   let sets;
   if (last) sets = last.sets.map(s => ({ kg: fmtKgInput(s.kg), reps: String(s.reps), done: false }));
-  else if (fromPlan) sets = Array.from({ length: Math.max(1, fromPlan.sets | 0) }, () => ({ kg: fmtKgInput(fromPlan.weight), reps: String(fromPlan.reps || ''), done: false }));
+  else if (fromPlan) sets = planSetsToDraft(fromPlan.sets);
   else sets = Array.from({ length: 3 }, () => ({ kg: '', reps: '', done: false }));
   state.draft.exercises.push({ name, sets });
   saveDraft();
@@ -370,6 +377,16 @@ async function finishWorkout() {
 /* =========================================================================
    VISTA: SCHEDE
    ========================================================================= */
+/** "4×8 · 60 kg" se le serie sono uguali, altrimenti "55×10 · 60×8 · …" (kg×rip, come nello storico). */
+function planSetsText(sets) {
+  const first = sets[0];
+  if (!first) return '';
+  if (sets.every(s => s.reps === first.reps && s.weight === first.weight)) {
+    return `${sets.length}×${first.reps}${first.weight ? ` · ${fmt(first.weight, 2)} kg` : ''}`;
+  }
+  return sets.map(s => `${fmt(s.weight, 2)}×${s.reps}`).join(' · ');
+}
+
 function renderSchede() {
   if (state.editor) return renderEditor();
   const cards = state.plans.map(p => {
@@ -378,7 +395,7 @@ function renderSchede() {
       <article class="card plan-card">
         <h2>${esc(p.name)}</h2>
         <p class="ex-list">${p.exercises.length
-          ? p.exercises.map(ex => `${esc(ex.name)} <span class="num">${ex.sets}×${ex.reps}${ex.weight ? ` · ${fmt(ex.weight, 2)} kg` : ''}</span>`).join('<br>')
+          ? p.exercises.map(ex => `${esc(ex.name)} <span class="num">${esc(planSetsText(ex.sets))}</span>`).join('<br>')
           : 'Nessun esercizio'}</p>
         <div class="actions">
           <button type="button" class="btn primary small" data-action="start" data-plan="${esc(p.id)}">Inizia</button>
@@ -406,11 +423,17 @@ function renderEditor() {
           <input type="text" data-efield="name" data-k="${k}" value="${esc(ex.name)}" list="exercise-names-schede" placeholder="Es. Panca piana" autocomplete="off"></label>
         <button type="button" class="icon-btn" data-action="ed-remove-ex" data-k="${k}" aria-label="Rimuovi esercizio ${k + 1}">${ICON.close}</button>
       </div>
-      <div class="nums">
-        <label class="field"><span>Serie</span><input type="text" inputmode="numeric" data-efield="sets" data-k="${k}" value="${esc(ex.sets)}"></label>
-        <label class="field"><span>Ripetizioni</span><input type="text" inputmode="numeric" data-efield="reps" data-k="${k}" value="${esc(ex.reps)}"></label>
-        <label class="field"><span>Peso (kg)</span><input type="text" inputmode="decimal" data-efield="weight" data-k="${k}" value="${esc(ex.weight)}"></label>
+      <div class="ed-sets">
+        <div class="ed-set-row head" aria-hidden="true"><span>#</span><span>Rip.</span><span>Kg</span><span></span></div>
+        ${ex.sets.map((set, s) => `
+        <div class="ed-set-row">
+          <span class="set-n">${s + 1}</span>
+          <input type="text" inputmode="numeric" autocomplete="off" data-efield="reps" data-k="${k}" data-s="${s}" value="${esc(set.reps)}" placeholder="rip" aria-label="${esc(ex.name || `Esercizio ${k + 1}`)}, serie ${s + 1}, ripetizioni">
+          <input type="text" inputmode="decimal" autocomplete="off" data-efield="weight" data-k="${k}" data-s="${s}" value="${esc(set.weight)}" placeholder="kg" aria-label="${esc(ex.name || `Esercizio ${k + 1}`)}, serie ${s + 1}, kg">
+          <button type="button" class="icon-btn" data-action="ed-remove-set" data-k="${k}" data-s="${s}" aria-label="Elimina serie ${s + 1}" title="Elimina serie" ${ex.sets.length <= 1 ? 'disabled' : ''}>${ICON.close}</button>
+        </div>`).join('')}
       </div>
+      <button type="button" class="btn small soft" data-action="ed-add-set" data-k="${k}">+ Serie</button>
     </div>`).join('');
 
   return `
@@ -428,12 +451,15 @@ function renderEditor() {
     </div>`;
 }
 
-const blankEditorExercise = () => ({ id: uid(), name: '', sets: '3', reps: '10', weight: '' });
+const blankEditorExercise = () => ({ id: uid(), name: '', sets: Array.from({ length: 3 }, () => ({ reps: '10', weight: '' })) });
 
 function openEditor(planId) {
   const p = state.plans.find(x => x.id === planId);
   state.editor = p
-    ? { id: p.id, name: p.name, exercises: p.exercises.map(ex => ({ id: ex.id || uid(), name: ex.name, sets: String(ex.sets), reps: String(ex.reps), weight: fmtKgInput(ex.weight) })) }
+    ? { id: p.id, name: p.name, exercises: p.exercises.map(ex => ({
+        id: ex.id || uid(), name: ex.name,
+        sets: ex.sets.map(s => ({ reps: String(s.reps), weight: fmtKgInput(s.weight) })),
+      })) }
     : { id: null, name: '', exercises: [blankEditorExercise()] };
   render();
   window.scrollTo(0, 0);
@@ -445,18 +471,7 @@ async function saveEditor() {
   if (!name) return toast('Dai un nome alla scheda.');
   const exercises = e.exercises
     .filter(ex => ex.name.trim())
-    .map(ex => {
-      const sets = Math.round(toNum(ex.sets));
-      const reps = Math.round(toNum(ex.reps));
-      const weight = toNum(ex.weight);
-      return {
-        id: ex.id || uid(),
-        name: ex.name.trim(),
-        sets: sets >= 1 ? sets : 3,
-        reps: reps >= 1 ? reps : 10,
-        weight: weight >= 0 ? weight : 0,
-      };
-    });
+    .map(ex => Model.migratePlanExercise({ id: ex.id, name: ex.name, sets: ex.sets })); // pulisce i valori (rip ≥ 1, kg ≥ 0)
   if (!exercises.length) return toast('Aggiungi almeno un esercizio.');
   const plan = { id: e.id || uid(), name, exercises };
   const plans = e.id ? state.plans.map(p => p.id === e.id ? plan : p) : [...state.plans, plan];
@@ -472,7 +487,7 @@ async function addExamplePlans() {
   const toAdd = EXAMPLE_PLANS.filter(p => !existing.has(norm(p.name))).map(p => ({
     id: uid(),
     name: p.name,
-    exercises: p.exercises.map(([name, sets, reps, weight]) => ({ id: uid(), name, sets, reps, weight })),
+    exercises: p.exercises.map(([name, sets]) => ({ id: uid(), name, sets: sets.map(([reps, weight]) => ({ reps, weight })) })),
   }));
   if (!toAdd.length) return toast('Gli esempi sono già presenti.');
   const plans = [...state.plans, ...toAdd];
@@ -658,7 +673,7 @@ function renderStorico() {
 async function exportData() {
   const data = {
     app: 'diario-palestra',
-    version: 1,
+    version: Model.DATA_VERSION, // versione del modello dati (vedi model.js)
     exportedAt: new Date().toISOString(),
     plans: state.plans,
     sessions: state.sessions,
@@ -709,26 +724,15 @@ function cleanSession(s) {
   };
 }
 
-function cleanPlan(p) {
-  if (!p || typeof p !== 'object' || !String(p.name ?? '').trim() || !Array.isArray(p.exercises)) return null;
-  return {
-    id: String(p.id || uid()),
-    name: String(p.name).trim(),
-    exercises: p.exercises.filter(ex => ex && String(ex.name ?? '').trim()).map(ex => ({
-      id: String(ex.id || uid()),
-      name: String(ex.name).trim(),
-      sets: Math.max(1, Math.round(toNum(ex.sets)) || 3),
-      reps: Math.max(1, Math.round(toNum(ex.reps)) || 10),
-      weight: Math.max(0, toNum(ex.weight) || 0),
-    })),
-  };
-}
-
 /** Importa un backup unendolo ai dati esistenti (stesso id = sostituito). */
 async function importFile(file) {
   let data;
   try { data = JSON.parse(await file.text()); } catch { throw new Error('Il file non è un JSON valido.'); }
-  const plansIn = (Array.isArray(data.plans) ? data.plans : []).map(cleanPlan).filter(Boolean);
+  if (!data || typeof data !== 'object') throw new Error('Il file non è un backup di Diario Palestra.');
+  // I backup senza "version" sono della versione 1. Le schede vecchie vengono migrate.
+  const version = Number(data.version) || 1;
+  if (version > Model.DATA_VERSION) throw new Error('Questo backup è stato creato da una versione più recente dell\'app. Aggiorna l\'app e riprova.');
+  const plansIn = Model.migratePlans(data.plans);
   const sessionsIn = (Array.isArray(data.sessions) ? data.sessions : []).map(cleanSession).filter(Boolean);
   if (!plansIn.length && !sessionsIn.length) throw new Error('Nel file non ci sono schede né allenamenti.');
 
@@ -834,6 +838,17 @@ const ACTIONS = {
     inputs[inputs.length - 1]?.focus();
   },
   'ed-remove-ex': el => { state.editor.exercises.splice(+el.dataset.k, 1); render(); },
+  'ed-add-set': el => {
+    const sets = state.editor.exercises[+el.dataset.k].sets;
+    const last = sets[sets.length - 1];
+    sets.push(last ? { ...last } : { reps: '10', weight: '' });
+    render();
+  },
+  'ed-remove-set': el => {
+    const sets = state.editor.exercises[+el.dataset.k].sets;
+    if (sets.length > 1) sets.splice(+el.dataset.s, 1);
+    render();
+  },
   'ed-cancel': () => { state.editor = null; render(); },
   'ed-save': () => saveEditor(),
 
@@ -896,6 +911,7 @@ document.addEventListener('input', e => {
   // Editor della scheda
   if (t.dataset.efield && state.editor) {
     if (t.dataset.efield === 'plan-name') state.editor.name = t.value;
+    else if (t.dataset.s !== undefined) state.editor.exercises[+t.dataset.k].sets[+t.dataset.s][t.dataset.efield] = t.value;
     else state.editor.exercises[+t.dataset.k][t.dataset.efield] = t.value;
   }
 });

@@ -224,8 +224,13 @@ input[type="date"]::-webkit-date-and-time-value { text-align: left; }
 .ed-ex { border-top: 1px solid var(--border); padding-top: 12px; display: grid; gap: 8px; }
 .ed-ex .top { display: flex; gap: 8px; align-items: flex-end; }
 .ed-ex .top .field { flex: 1; }
-.ed-ex .nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.ed-ex .nums input { text-align: center; }
+.ed-sets { display: flex; flex-direction: column; gap: 6px; }
+.ed-set-row { display: grid; grid-template-columns: 2rem minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 8px; align-items: center; }
+.ed-set-row.head { font-size: 0.8rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; text-align: center; }
+.ed-set-row .set-n { font-family: var(--font-display); font-weight: 600; font-size: 1.2rem; text-align: center; color: var(--muted); }
+.ed-set-row input { text-align: center; font-family: var(--font-display); font-size: 1.25rem; font-weight: 600; padding: 6px 4px; }
+.ed-ex > .btn { justify-self: start; }
+.icon-btn:disabled { opacity: 0.3; cursor: default; }
 
 /* ---------- Progressi ---------- */
 .segmented { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 3px; gap: 3px; }

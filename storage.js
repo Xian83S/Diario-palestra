@@ -6,7 +6,7 @@
  * esterno (API, database remoto…) senza toccare app.js.
  *
  * Interfaccia:
- *   load()               -> { plans, sessions, draft }
+ *   load()               -> { plans, sessions, draft }  (migra i dati vecchi, vedi model.js)
  *   savePlans(plans)
  *   saveSession(session)  (inserisce o aggiorna per id)
  *   deleteSession(id)
@@ -21,6 +21,8 @@ const Store = (() => {
     sessions: 'diarioPalestra.sessions',
     draft: 'diarioPalestra.draft',
     lastBackup: 'diarioPalestra.lastBackup',
+    dataVersion: 'diarioPalestra.dataVersion',
+    plansV1Copy: 'diarioPalestra.plans.v1', // copia di sicurezza prima della migrazione
   };
 
   function read(key, fallback) {
@@ -46,8 +48,18 @@ const Store = (() => {
 
   return {
     async load() {
-      const plans = read(KEYS.plans, []);
+      let plans = read(KEYS.plans, []);
       const sessions = read(KEYS.sessions, []);
+      const version = read(KEYS.dataVersion, 1);
+      if (version < Model.DATA_VERSION) {
+        // Migrazione automatica delle schede (le sessioni restano com'erano).
+        if (Array.isArray(plans) && plans.length && localStorage.getItem(KEYS.plansV1Copy) === null) {
+          write(KEYS.plansV1Copy, plans);
+        }
+        plans = Model.migratePlans(plans);
+        write(KEYS.plans, plans);
+        write(KEYS.dataVersion, Model.DATA_VERSION);
+      }
       return {
         plans: Array.isArray(plans) ? plans : [],
         sessions: Array.isArray(sessions) ? sessions : [],
