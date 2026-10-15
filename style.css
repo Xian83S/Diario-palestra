@@ -401,3 +401,13 @@ input.switch:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-s
 .rest-timer.is-set { background: var(--text); color: var(--bg); }
 .rest-timer.is-set .rt-adjust { display: none; }
 .rest-timer.is-set .rt-actions button { background: rgba(127, 127, 127, 0.25); }
+
+/* ---------- Peso corporeo ---------- */
+.segmented.two { grid-template-columns: repeat(2, 1fr); }
+.body-form { display: flex; flex-direction: column; gap: 12px; }
+.body-form-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 10px; }
+.body-form [data-bfield="kg"] { text-align: center; font-family: var(--font-display); font-size: 1.4rem; font-weight: 700; }
+.body-note { font-size: 0.9rem; }
+.bw-item { align-items: center; }
+.bw-item .main { flex: 1; }
+.bw-item .icon-btn { margin-left: 4px; }

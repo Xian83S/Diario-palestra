@@ -9,15 +9,18 @@
  *       + campo facoltativo `rest`: secondi di recupero tra le serie (predefinito 90).
  *   3 — come la 2, più `timer: {enabled, seconds}` per gli esercizi a tempo
  *       (plank, isometrie). Predefinito: {enabled: false, seconds: 30}.
+ *   4 — nuova raccolta `bodyWeights`: [{id, date: "YYYY-MM-DD", kg, createdAt}],
+ *       al massimo una registrazione per data. Le schede non cambiano.
  * Tutti i campi mancanti vengono completati con i valori predefiniti.
  * Le sessioni registrate non cambiano tra le versioni.
  */
 const Model = (() => {
-  const DATA_VERSION = 3;
+  const DATA_VERSION = 4;
   const DEFAULT_REPS = 10;
   const DEFAULT_SETS = 3;
   const REST = { default: 90, min: 15, max: 600, step: 15 }; // secondi
   const TIMER = { seconds: 30, max: 3600 };                   // secondi
+  const BODY_WEIGHT = { min: 20, max: 400 };                  // kg accettati
 
   const num = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
   const cleanReps = v => { const n = Math.round(num(v)); return n >= 1 ? n : DEFAULT_REPS; };
@@ -66,5 +69,35 @@ const Model = (() => {
     return (Array.isArray(plans) ? plans : []).map(migratePlan).filter(Boolean);
   }
 
-  return { DATA_VERSION, REST, TIMER, cleanRest, cleanTimer, migratePlan, migratePlans, migratePlanExercise };
+  const isDate = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d)) && !Number.isNaN(new Date(`${d}T00:00:00`).getTime());
+  const validBodyKg = kg => Number.isFinite(kg) && kg >= BODY_WEIGHT.min && kg <= BODY_WEIGHT.max;
+
+  /** Una registrazione del peso corporeo, o null se non valida (kg arrotondati a 0,01). */
+  function cleanBodyWeight(w) {
+    if (!w || typeof w !== 'object' || !isDate(w.date)) return null;
+    const kg = num(w.kg);
+    if (!validBodyKg(kg)) return null;
+    return {
+      id: String(w.id || newId()),
+      date: w.date,
+      kg: Math.round(kg * 100) / 100,
+      createdAt: w.createdAt ? String(w.createdAt) : new Date().toISOString(),
+    };
+  }
+
+  /** Pulisce la raccolta: una registrazione per data (vince la più recente), in ordine di data. */
+  function cleanBodyWeights(list) {
+    const byDate = new Map();
+    for (const w of (Array.isArray(list) ? list : []).map(cleanBodyWeight).filter(Boolean)) {
+      const prev = byDate.get(w.date);
+      if (!prev || String(w.createdAt) >= String(prev.createdAt)) byDate.set(w.date, w);
+    }
+    return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  return {
+    DATA_VERSION, REST, TIMER, BODY_WEIGHT,
+    cleanRest, cleanTimer, migratePlan, migratePlans, migratePlanExercise,
+    validBodyKg, cleanBodyWeight, cleanBodyWeights,
+  };
 })();

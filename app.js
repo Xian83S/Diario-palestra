@@ -12,7 +12,9 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 const norm = s => String(s ?? '').trim().toLowerCase();
 const pad = n => String(n).padStart(2, '0');
 const toNum = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
-const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const dateStr = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const todayStr = () => dateStr(new Date());
+const daysAgoStr = n => { const d = new Date(); d.setDate(d.getDate() - n); return dateStr(d); };
 const fmt = (n, dec = 1) => Number.isFinite(n) ? n.toLocaleString('it-IT', { maximumFractionDigits: dec }) : '–';
 const fmtKgInput = n => Number.isFinite(n) && n > 0 ? String(n).replace('.', ',') : (n === 0 ? '0' : '');
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -57,7 +59,10 @@ const state = {
   draft: null,
   summary: null,     // riepilogo dopo "Termina allenamento"
   editor: null,      // scheda in modifica
-  progress: { exercise: '', metric: 'max' },
+  progress: { exercise: '', metric: 'max', mode: 'exercises', range: '90' },
+  bodyWeights: [],   // peso corporeo, in ordine di data
+  bodyForm: { date: '', kg: '' },
+  bodyShowAll: false,
   openSessions: new Set(),
   confirm: null,     // chiave del pulsante "armato" (eliminazione a due passaggi)
   lastBackup: null,
@@ -728,11 +733,23 @@ const METRICS = {
   volume: { label: 'Volume', key: 'volume', unit: 'kg' },
 };
 
+const chartWidth = () => Math.max(240, Math.min(608, ($('#view-progressi').clientWidth || 340) - 30));
+
 function renderProgressi() {
+  const mode = state.progress.mode;
+  return `
+    <header class="view-head"><h1>Progressi</h1></header>
+    <div class="segmented two" role="group" aria-label="Cosa mostrare">
+      <button type="button" data-action="progress-mode" data-mode="exercises" aria-pressed="${mode === 'exercises'}">Esercizi</button>
+      <button type="button" data-action="progress-mode" data-mode="body" aria-pressed="${mode === 'body'}">Peso corporeo</button>
+    </div>
+    ${mode === 'body' ? renderBodyWeight() : renderExerciseProgress()}`;
+}
+
+function renderExerciseProgress() {
   const names = knownExerciseNames({ withHistoryOnly: true });
   if (!names.length) {
     return `
-      <header class="view-head"><h1>Progressi</h1></header>
       <div class="card empty"><h2>Ancora nessun dato</h2><p>Termina il primo allenamento e qui vedrai grafici e record per ogni esercizio.</p></div>`;
   }
   if (!names.some(n => norm(n) === norm(state.progress.exercise))) state.progress.exercise = names[0];
@@ -747,11 +764,9 @@ function renderProgressi() {
   const deltaPct = first[metric.key] > 0 ? (delta / first[metric.key]) * 100 : null;
   const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
 
-  const width = Math.max(240, Math.min(608, ($('#view-progressi').clientWidth || 340) - 30));
   const points = hist.map(h => ({ date: h.date, v: h[metric.key] }));
 
   return `
-    <header class="view-head"><h1>Progressi</h1></header>
     <label class="field"><span>Esercizio</span>
       <select data-field="progress-ex">${names.map(n => `<option value="${esc(n)}" ${norm(n) === norm(state.progress.exercise) ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
     </label>
@@ -759,7 +774,7 @@ function renderProgressi() {
       ${Object.entries(METRICS).map(([k, m]) => `<button type="button" data-action="metric" data-metric="${k}" aria-pressed="${k === state.progress.metric}">${m.label}</button>`).join('')}
     </div>
     <article class="card">
-      <div class="chart-wrap">${chartSVG(points, width, metric)}</div>
+      <div class="chart-wrap">${chartSVG(points, chartWidth(), metric)}</div>
     </article>
     <div class="tiles">
       <div class="tile record"><div class="label">Record</div><div class="value">${fmt(bestMax, 2)}<small>kg</small></div><div class="hint">${esc(fmtDateRel(bestMaxDate))}</div></div>
@@ -779,6 +794,96 @@ function renderProgressi() {
     </article>`;
 }
 
+/* ---------- Peso corporeo ---------- */
+const BODY_RANGES = { 30: '1 mese', 90: '3 mesi', all: 'Tutto' };
+const signed = (n, dec = 1) => `${n > 0 ? '+' : n < 0 ? '−' : '±'}${fmt(Math.abs(n), dec)}`;
+
+function renderBodyWeight() {
+  const list = state.bodyWeights;                  // in ordine di data
+  const form = state.bodyForm;
+  const formDate = form.date || todayStr();
+  const existing = list.find(w => w.date === formDate);
+  const last = list[list.length - 1];
+
+  const formHtml = `
+    <form class="card body-form" data-form="body-weight" autocomplete="off">
+      <h2>Registra il peso</h2>
+      <div class="body-form-row">
+        <label class="field"><span>Data</span>
+          <input type="date" data-bfield="date" value="${esc(formDate)}" max="${todayStr()}" required></label>
+        <label class="field"><span>Peso (kg)</span>
+          <input type="text" inputmode="decimal" data-bfield="kg" value="${esc(form.kg)}" placeholder="${last ? esc(fmtKgInput(last.kg)) : 'es. 78,5'}" enterkeyhint="done"></label>
+      </div>
+      ${existing ? `<p class="muted body-note">Per questa data c'è già <strong class="num">${fmt(existing.kg, 2)} kg</strong>: il nuovo valore lo sostituisce.</p>` : ''}
+      <button type="submit" class="btn primary block">${existing ? 'Aggiorna peso' : 'Salva peso'}</button>
+    </form>`;
+
+  if (!list.length) {
+    return `${formHtml}
+      <div class="card empty"><h2>Nessuna registrazione</h2><p>Pesati sempre nelle stesse condizioni (per esempio al mattino, a digiuno) per un andamento affidabile.</p></div>`;
+  }
+
+  const range = state.progress.range;
+  const from = range === 'all' ? '' : daysAgoStr(Number(range));
+  const inRange = list.filter(w => w.date >= from);
+  const lastWeek = list.filter(w => w.date > daysAgoStr(7));
+  const avg7 = lastWeek.length ? lastWeek.reduce((a, w) => a + w.kg, 0) / lastWeek.length : null;
+  const first = inRange[0], lastIn = inRange[inRange.length - 1];
+  const delta = inRange.length > 1 ? lastIn.kg - first.kg : null;
+  const kgs = inRange.map(w => w.kg);
+
+  const newestFirst = [...list].reverse();
+  const shown = state.bodyShowAll ? newestFirst : newestFirst.slice(0, 10);
+  const rows = shown.map(w => {
+    const prev = list[list.indexOf(w) - 1];
+    const delKey = `bw-${w.id}`;
+    return `
+      <div class="list-item bw-item">
+        <div class="main"><strong>${esc(fmtDateRel(w.date))}</strong>
+          ${prev ? `<div class="sets-txt num">${signed(w.kg - prev.kg)} kg dalla precedente</div>` : ''}</div>
+        <div class="right">${fmt(w.kg, 2)} <small class="muted">kg</small></div>
+        <button type="button" class="icon-btn ${armed(delKey) ? 'armed' : ''}" data-action="bw-delete" data-id="${esc(w.id)}" aria-label="Elimina il peso del ${esc(fmtDate(w.date))}">
+          ${armed(delKey) ? 'Elimina?' : ICON.close}</button>
+      </div>`;
+  }).join('');
+
+  return `${formHtml}
+    <div class="segmented" role="group" aria-label="Periodo">
+      ${Object.entries(BODY_RANGES).map(([k, label]) => `<button type="button" data-action="bw-range" data-range="${k}" aria-pressed="${k === range}">${label}</button>`).join('')}
+    </div>
+    <article class="card">
+      ${inRange.length
+        ? `<div class="chart-wrap">${chartSVG(inRange.map(w => ({ date: w.date, v: w.kg })), chartWidth(), { label: 'Peso corporeo', unit: 'kg' }, { timeScale: true, highlightBest: false, per: 'nel tempo' })}</div>`
+        : '<p class="muted empty">Nessuna registrazione in questo periodo.</p>'}
+    </article>
+    <div class="tiles">
+      <div class="tile"><div class="label">Attuale</div><div class="value">${fmt(last.kg, 1)}<small>kg</small></div><div class="hint">${esc(fmtDateRel(last.date))}</div></div>
+      <div class="tile"><div class="label">Variazione</div><div class="value">${delta !== null ? `${signed(delta)}<small>kg</small>` : '–'}</div>
+        <div class="hint">${delta !== null ? `dal ${esc(fmtDate(first.date, { day: 'numeric', month: 'short' }))}` : 'servono 2 registrazioni'}</div></div>
+      <div class="tile"><div class="label">Media 7 giorni</div><div class="value">${avg7 !== null ? `${fmt(avg7, 1)}<small>kg</small>` : '–'}</div>
+        <div class="hint">${avg7 !== null ? plural(lastWeek.length, 'registrazione', 'registrazioni') : 'nessuna questa settimana'}</div></div>
+      <div class="tile"><div class="label">Min – max</div><div class="value">${kgs.length ? `${fmt(Math.min(...kgs), 1)}–${fmt(Math.max(...kgs), 1)}` : '–'}</div>
+        <div class="hint">${esc(BODY_RANGES[range].toLowerCase())}</div></div>
+    </div>
+    <h2 class="section-title">Registrazioni</h2>
+    <article class="card list">${rows}</article>
+    ${list.length > 10 ? `<button type="button" class="btn ghost block" data-action="bw-show-all">${state.bodyShowAll ? 'Mostra meno' : `Mostra tutte (${list.length})`}</button>` : ''}`;
+}
+
+async function saveBodyWeightFromForm() {
+  const date = state.bodyForm.date || todayStr();
+  const kg = toNum(state.bodyForm.kg);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > todayStr()) return toast('Scegli una data valida (non nel futuro).');
+  if (!Model.validBodyKg(kg)) return toast(`Inserisci un peso tra ${Model.BODY_WEIGHT.min} e ${Model.BODY_WEIGHT.max} kg.`);
+  const existing = state.bodyWeights.find(w => w.date === date);
+  const entry = Model.cleanBodyWeight({ id: existing ? existing.id : uid(), date, kg, createdAt: new Date().toISOString() });
+  await Store.saveBodyWeight(entry);
+  state.bodyWeights = Model.cleanBodyWeights([...state.bodyWeights.filter(w => w.date !== date), entry]);
+  state.bodyForm = { date: '', kg: '' };
+  toast(existing ? 'Peso aggiornato.' : 'Peso salvato.');
+  render();
+}
+
 function niceScale(min, max, count = 4) {
   const range = max - min || 1;
   const rough = range / count;
@@ -792,25 +897,40 @@ function niceScale(min, max, count = 4) {
   return { lo, hi: hi === lo ? lo + step : hi, ticks };
 }
 
-/** Grafico a linea in SVG, disegnato a mano. */
-function chartSVG(points, W, metric) {
+/**
+ * Grafico a linea in SVG, disegnato a mano.
+ * opts.timeScale: posizione orizzontale proporzionale alla data (registrazioni irregolari)
+ * opts.highlightBest: evidenzia in ambra il valore massimo (record)
+ */
+function chartSVG(points, W, metric, opts = {}) {
+  const { timeScale = false, highlightBest = true, per = 'per sessione' } = opts;
   const H = 220, pl = 46, pr = 16, pt = 22, pb = 30;
   const vals = points.map(p => p.v);
   let min = Math.min(...vals), max = Math.max(...vals);
   if (min === max) { const pad = max === 0 ? 1 : Math.abs(max) * 0.1; min = Math.max(0, min - pad); max += pad; }
   const { lo, hi, ticks } = niceScale(min, max, 4);
   const iw = W - pl - pr, ih = H - pt - pb;
-  const x = i => points.length === 1 ? pl + iw / 2 : pl + (i * iw) / (points.length - 1);
+  const times = points.map(p => parseDate(p.date).getTime());
+  const t0 = times[0], t1 = times[times.length - 1];
+  const x = i => points.length === 1 ? pl + iw / 2
+    : timeScale ? (t1 === t0 ? pl + iw / 2 : pl + ((times[i] - t0) * iw) / (t1 - t0))
+    : pl + (i * iw) / (points.length - 1);
   const y = v => pt + ((hi - v) * ih) / (hi - lo);
 
   const grid = ticks.map(t => `
     <line class="grid" x1="${pl}" x2="${W - pr}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"/>
     <text class="axis-label" x="${pl - 8}" y="${(y(t) + 4).toFixed(1)}" text-anchor="end">${fmt(t, 1)}</text>`).join('');
 
-  // Etichette date: al massimo 4, distribuite.
+  // Etichette date: al massimo 4, distribuite, senza sovrapporsi (almeno 64 px tra una e l'altra).
   const n = points.length;
-  const labelIdx = n <= 4 ? points.map((_, i) => i) : [0, Math.round((n - 1) / 3), Math.round((2 * (n - 1)) / 3), n - 1];
-  const xLabels = [...new Set(labelIdx)].map(i => {
+  const candidates = n <= 4 ? points.map((_, i) => i) : [0, Math.round((n - 1) / 3), Math.round((2 * (n - 1)) / 3), n - 1];
+  const labelIdx = [];
+  for (const i of [...new Set(candidates)]) {
+    const prev = labelIdx[labelIdx.length - 1];
+    if (prev === undefined || x(i) - x(prev) >= 64) labelIdx.push(i);
+    else if (i === n - 1 && labelIdx.length > 1) labelIdx[labelIdx.length - 1] = i; // l'ultima data vale più di una intermedia
+  }
+  const xLabels = labelIdx.map(i => {
     const anchor = n === 1 ? 'middle' : i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
     return `<text class="axis-label" x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="${anchor}">${esc(fmtDate(points[i].date, { day: 'numeric', month: 'short' }))}</text>`;
   }).join('');
@@ -818,8 +938,7 @@ function chartSVG(points, W, metric) {
   const coords = points.map((p, i) => [x(i), y(p.v)]);
   const line = coords.map(([cx, cy], i) => `${i ? 'L' : 'M'}${cx.toFixed(1)},${cy.toFixed(1)}`).join(' ');
   const area = n > 1 ? `${line} L${coords[n - 1][0].toFixed(1)},${(pt + ih).toFixed(1)} L${coords[0][0].toFixed(1)},${(pt + ih).toFixed(1)} Z` : '';
-  const best = Math.max(...vals);
-  const bestIdx = vals.lastIndexOf(best);
+  const bestIdx = highlightBest ? vals.lastIndexOf(Math.max(...vals)) : -1;
   const dots = coords.map(([cx, cy], i) => `
     <circle class="dot ${i === bestIdx ? 'best' : ''}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${n > 40 ? 3 : 4.5}">
       <title>${esc(fmtDate(points[i].date))}: ${fmt(points[i].v, 1)} ${metric.unit}</title></circle>`).join('');
@@ -828,7 +947,7 @@ function chartSVG(points, W, metric) {
 
   return `
     <svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img"
-      aria-label="${esc(metric.label)} per sessione, ${n} ${n === 1 ? 'punto' : 'punti'}, ultimo valore ${fmt(points[n - 1].v, 1)} kg">
+      aria-label="${esc(metric.label)} ${per}, ${n} ${n === 1 ? 'punto' : 'punti'}, ultimo valore ${fmt(points[n - 1].v, 1)} kg">
       ${grid}
       ${area ? `<path class="area" d="${area}"/>` : ''}
       ${n > 1 ? `<path class="line" d="${line}"/>` : ''}
@@ -899,6 +1018,7 @@ async function exportData() {
     exportedAt: new Date().toISOString(),
     plans: state.plans,
     sessions: state.sessions,
+    bodyWeights: state.bodyWeights,
   };
   const name = `diario-palestra-${todayStr()}.json`;
   const json = JSON.stringify(data, null, 2);
@@ -956,18 +1076,24 @@ async function importFile(file) {
   if (version > Model.DATA_VERSION) throw new Error('Questo backup è stato creato da una versione più recente dell\'app. Aggiorna l\'app e riprova.');
   const plansIn = Model.migratePlans(data.plans);
   const sessionsIn = (Array.isArray(data.sessions) ? data.sessions : []).map(cleanSession).filter(Boolean);
-  if (!plansIn.length && !sessionsIn.length) throw new Error('Nel file non ci sono schede né allenamenti.');
+  const weightsIn = Model.cleanBodyWeights(data.bodyWeights); // assente nei backup fino alla versione 3
+  if (!plansIn.length && !sessionsIn.length && !weightsIn.length) throw new Error('Nel file non ci sono schede, allenamenti né pesi.');
 
   const plans = new Map(state.plans.map(p => [p.id, p]));
   plansIn.forEach(p => plans.set(p.id, p));
   const sessions = new Map(state.sessions.map(s => [s.id, s]));
   sessionsIn.forEach(s => sessions.set(s.id, s));
 
-  const next = { plans: [...plans.values()], sessions: [...sessions.values()] };
+  // Peso corporeo: unito per data (a parità di data vince il backup importato)
+  const weights = new Map(state.bodyWeights.map(w => [w.date, w]));
+  weightsIn.forEach(w => weights.set(w.date, w));
+
+  const next = { plans: [...plans.values()], sessions: [...sessions.values()], bodyWeights: Model.cleanBodyWeights([...weights.values()]) };
   await Store.replaceAll(next);
   state.plans = next.plans;
   state.sessions = next.sessions;
-  toast(`Importati: ${plural(sessionsIn.length, 'allenamento', 'allenamenti')}, ${plural(plansIn.length, 'scheda', 'schede')}.`);
+  state.bodyWeights = next.bodyWeights;
+  toast(`Importati: ${plural(sessionsIn.length, 'allenamento', 'allenamenti')}, ${plural(plansIn.length, 'scheda', 'schede')}, ${plural(weightsIn.length, 'peso', 'pesi')}.`);
   render();
 }
 
@@ -1086,6 +1212,17 @@ const ACTIONS = {
   'ed-save': () => saveEditor(),
 
   'metric': el => { state.progress.metric = el.dataset.metric; render(); },
+  'progress-mode': el => { state.progress.mode = el.dataset.mode; state.confirm = null; render(); },
+  'bw-range': el => { state.progress.range = el.dataset.range; render(); },
+  'bw-show-all': () => { state.bodyShowAll = !state.bodyShowAll; render(); },
+  'bw-delete': async el => {
+    const id = el.dataset.id;
+    if (!confirmTwice(`bw-${id}`)) return;
+    await Store.deleteBodyWeight(id);
+    state.bodyWeights = state.bodyWeights.filter(w => w.id !== id);
+    toast('Registrazione eliminata.');
+    render();
+  },
 
   'sess-toggle': el => {
     const id = el.dataset.id;
@@ -1145,6 +1282,8 @@ document.addEventListener('input', e => {
     if (t.value) { state.draft.date = t.value; saveDraft(); }
     return;
   }
+  // Peso corporeo: il valore resta tra un ridisegno e l'altro
+  if (t.dataset.bfield === 'kg') { state.bodyForm.kg = t.value; return; }
   // Editor della scheda
   if (t.dataset.efield && state.editor) {
     if (t.dataset.efield === 'plan-name') state.editor.name = t.value;
@@ -1161,6 +1300,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.dataset.field === 'progress-ex') { state.progress.exercise = t.value; render(); return; }
+  if (t.dataset.bfield === 'date') { state.bodyForm.date = t.value; render(); return; } // aggiorna "Salva/Aggiorna" 
   if (t.id === 'import-file' && t.files && t.files[0]) {
     const file = t.files[0];
     t.value = '';
@@ -1174,6 +1314,10 @@ document.addEventListener('submit', e => {
     e.preventDefault();
     addDraftExercise(form.elements.name.value);
     $('[data-form="add-ex"] input')?.focus();
+  } else if (form.dataset.form === 'body-weight') {
+    e.preventDefault();
+    document.activeElement && document.activeElement.blur(); // chiude la tastiera
+    safely(saveBodyWeightFromForm);
   } else if (form.dataset.form === 'editor') {
     e.preventDefault();
     safely(saveEditor);
@@ -1247,6 +1391,7 @@ async function registerServiceWorker() {
     const data = await Store.load();
     state.plans = data.plans;
     state.sessions = data.sessions;
+    state.bodyWeights = data.bodyWeights || [];
     state.draft = data.draft && Array.isArray(data.draft.exercises) ? data.draft : null;
     state.lastBackup = await Store.getLastBackup();
   } catch (err) {
