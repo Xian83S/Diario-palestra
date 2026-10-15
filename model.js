@@ -6,16 +6,23 @@
  *   1 — esercizio di una scheda: {id, name, sets: 4, reps: 8, weight: 60}
  *   2 — esercizio di una scheda: {id, name, sets: [{reps: 8, weight: 60}, …]}
  *       (ogni serie ha le proprie ripetizioni e il proprio peso)
+ *       + campo facoltativo `rest`: secondi di recupero tra le serie (predefinito 90).
+ *         Se manca viene aggiunto con il valore predefinito, senza cambiare versione.
  * Le sessioni registrate non cambiano tra le versioni.
  */
 const Model = (() => {
   const DATA_VERSION = 2;
   const DEFAULT_REPS = 10;
   const DEFAULT_SETS = 3;
+  const REST = { default: 90, min: 15, max: 600, step: 15 }; // secondi
 
   const num = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
   const cleanReps = v => { const n = Math.round(num(v)); return n >= 1 ? n : DEFAULT_REPS; };
   const cleanWeight = v => { const n = num(v); return n >= 0 ? n : 0; };
+  const cleanRest = v => {
+    const n = Math.round(num(v));
+    return Number.isFinite(n) && n > 0 ? Math.min(REST.max, Math.max(REST.min, n)) : REST.default;
+  };
   const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
   /** Porta un esercizio di scheda (v1 o v2) al formato v2. Restituisce null se non valido. */
@@ -33,7 +40,7 @@ const Model = (() => {
       sets = Array.from({ length: count }, () => ({ ...set }));
     }
     if (!sets.length) sets = [{ reps: DEFAULT_REPS, weight: 0 }];
-    return { id: String(ex.id || newId()), name: String(ex.name).trim(), sets };
+    return { id: String(ex.id || newId()), name: String(ex.name).trim(), sets, rest: cleanRest(ex.rest) };
   }
 
   /** Porta una scheda al formato v2. Restituisce null se non valida. */
@@ -47,5 +54,5 @@ const Model = (() => {
     return (Array.isArray(plans) ? plans : []).map(migratePlan).filter(Boolean);
   }
 
-  return { DATA_VERSION, migratePlan, migratePlans, migratePlanExercise };
+  return { DATA_VERSION, REST, cleanRest, migratePlan, migratePlans, migratePlanExercise };
 })();

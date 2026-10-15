@@ -59,6 +59,9 @@ const Store = (() => {
         plans = Model.migratePlans(plans);
         write(KEYS.plans, plans);
         write(KEYS.dataVersion, Model.DATA_VERSION);
+      } else {
+        // Completa i campi facoltativi (es. recupero) senza riscrivere i dati.
+        plans = Model.migratePlans(plans);
       }
       return {
         plans: Array.isArray(plans) ? plans : [],

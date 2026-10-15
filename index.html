@@ -34,6 +34,22 @@
     <section id="view-storico" class="view" aria-labelledby="tab-storico" hidden></section>
   </main>
 
+  <div id="rest-timer" class="rest-timer" role="timer" aria-live="off" hidden>
+    <div class="rt-progress" aria-hidden="true"><span id="rt-bar"></span></div>
+    <div class="rt-body">
+      <div class="rt-info">
+        <span class="rt-label" id="rt-label">Recupero</span>
+        <span class="rt-time" id="rt-time">0:00</span>
+      </div>
+      <div class="rt-actions">
+        <button type="button" class="rt-adjust" data-action="rest-adjust" data-delta="-15" aria-label="Togli 15 secondi">−15</button>
+        <button type="button" class="rt-adjust" data-action="rest-adjust" data-delta="15" aria-label="Aggiungi 15 secondi">+15</button>
+        <button type="button" class="rt-stop" data-action="rest-stop" aria-label="Chiudi timer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
   <div id="update-banner" class="update-banner" hidden>
     <span>Nuova versione disponibile</span>
     <button type="button" data-action="update-app">Aggiorna</button>

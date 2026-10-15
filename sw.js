@@ -3,7 +3,7 @@
  * IMPORTANTE: quando pubblichi una modifica a qualsiasi file, aumenta VERSION
  * (es. 'v2'), altrimenti il telefono continua a usare la copia in cache.
  */
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = `diario-palestra-${VERSION}`;
 const ASSETS = [
   './',
