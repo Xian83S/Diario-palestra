@@ -3,13 +3,14 @@
  * IMPORTANTE: quando pubblichi una modifica a qualsiasi file, aumenta VERSION
  * (es. 'v2'), altrimenti il telefono continua a usare la copia in cache.
  */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = `diario-palestra-${VERSION}`;
 const ASSETS = [
   './',
   './index.html',
   './style.css',
   './app.js',
+  './model.js',
   './storage.js',
   './manifest.webmanifest',
   './icons/apple-touch-icon.png',
