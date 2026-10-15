@@ -77,7 +77,7 @@ const EXAMPLE_PLANS = [
   ] },
   { name: 'Gambe', exercises: [
     ['Squat', [[8, 70], [6, 80], [6, 80], [5, 85]]], ['Stacco rumeno', same(3, 8, 70)], ['Pressa', same(3, 10, 120)],
-    ['Leg curl', same(3, 12, 35)], ['Calf raise', same(4, 12, 40)],
+    ['Leg curl', same(3, 12, 35)], ['Calf raise', same(4, 12, 40)], ['Plank', same(3, 1, 0), { timer: 45 }],
   ] },
 ];
 
@@ -218,6 +218,9 @@ function renderDraft() {
         <input type="text" inputmode="decimal" autocomplete="off" enterkeyhint="next" aria-label="Serie ${j + 1}, kg" data-field="kg" value="${esc(s.kg)}" placeholder="kg">
         <input type="text" inputmode="numeric" autocomplete="off" enterkeyhint="done" aria-label="Serie ${j + 1}, ripetizioni" data-field="reps" value="${esc(s.reps)}" placeholder="rip">
         <button type="button" class="check" data-action="set-toggle" aria-pressed="${s.done}" aria-label="Serie ${j + 1} fatta">${ICON.check}</button>
+        ${exTimerOn(ex) ? (timerFor(i, j)
+          ? `<button type="button" class="set-timer-btn running" data-action="timer-stop">${ICON.timer}<span>Ferma timer</span></button>`
+          : `<button type="button" class="set-timer-btn" data-action="set-timer" data-i="${i}" data-j="${j}" aria-label="Avvia timer serie ${j + 1}, ${ex.timer.seconds} secondi">${ICON.timer}<span>Avvia timer <span class="num">${fmtDur(ex.timer.seconds)}</span></span></button>`) : ''}
       </div>`).join('');
     const rmKey = `ex-${i}`;
     return `
@@ -309,6 +312,7 @@ function startWorkout(planId) {
     exercises: plan ? plan.exercises.map(ex => ({
       name: ex.name,
       rest: restOf(ex),
+      timer: Model.cleanTimer(ex.timer),
       sets: planSetsToDraft(ex.sets),
     })) : [],
     timer: null,
@@ -328,7 +332,7 @@ function addDraftExercise(name) {
   if (last) sets = last.sets.map(s => ({ kg: fmtKgInput(s.kg), reps: String(s.reps), done: false }));
   else if (fromPlan) sets = planSetsToDraft(fromPlan.sets);
   else sets = Array.from({ length: 3 }, () => ({ kg: '', reps: '', done: false }));
-  state.draft.exercises.push({ name, rest: restOf(fromPlan), sets });
+  state.draft.exercises.push({ name, rest: restOf(fromPlan), timer: Model.cleanTimer(fromPlan && fromPlan.timer), sets });
   saveDraft();
   render();
 }
@@ -376,7 +380,7 @@ async function finishWorkout() {
   await Store.saveDraft(null);
   state.sessions.push(session);
   state.draft = null;
-  updateRestTimer();
+  updateTimer();
   state.summary = { session, sets: sessionSetCount(session), volume: sessionVolume(session), records };
   state.progress.exercise = '';
   render();
@@ -384,78 +388,149 @@ async function finishWorkout() {
 }
 
 /* =========================================================================
-   TIMER DI RECUPERO
-   Lo stato sta nella bozza (draft.timer = {exercise, total, endsAt}), così
-   sopravvive alla chiusura dell'app. Il tempo si calcola da endsAt, quindi
-   resta giusto anche se iOS sospende l'app.
+   TIMER: esercizio a tempo (plank, isometrie) e recupero tra le serie.
+   Un solo timer attivo alla volta, salvato nella bozza così sopravvive alla
+   chiusura dell'app:
+     draft.timer = {kind: 'set' | 'rest', exercise, i, j, total, endsAt}
+   Il tempo rimasto si calcola SEMPRE dall'ora di fine (endsAt), mai contando
+   i "tic": niente setInterval. Il display si aggiorna con requestAnimationFrame
+   e un setTimeout puntato sull'ora di fine chiude il timer anche quando i
+   frame sono sospesi. Al ritorno nell'app (visibilitychange) si ricalcola tutto.
    ========================================================================= */
-const REST_SHOW_FINISHED_MS = 20000; // quanto resta visibile "Recupero finito"
-let restTick = null;
-let restAlerted = false;
+const TIMER_SHOW_FINISHED_MS = 20000; // quanto resta visibile "Recupero finito"
+const TIMER_SOUND_GRACE_MS = 5000;    // oltre questo ritardo la fine non suona più
+let timerFrame = null;
+let timerEndTimeout = null;
+let timerAlerted = false;
 let audioCtx = null;
 let wakeLock = null;
 
-function startRest(i) {
+const exTimerOn = ex => !!(ex && ex.timer && ex.timer.enabled && ex.timer.seconds > 0);
+const timerFor = (i, j) => {
+  const t = state.draft && state.draft.timer;
+  return t && t.kind === 'set' && t.i === i && t.j === j ? t : null;
+};
+
+/** Salva, ridisegna i pulsanti delle serie e aggiorna la barra del timer. */
+function timerChanged() {
+  saveDraft();
+  render();
+  updateTimer();
+}
+
+/** Recupero dell'esercizio i, a partire da startAt (di default: adesso). */
+function setRestTimer(i, startAt = Date.now()) {
   const ex = state.draft.exercises[i];
   const total = restOf(ex);
-  state.draft.timer = { exercise: ex.name, total, endsAt: Date.now() + total * 1000 };
-  restAlerted = false;
+  state.draft.timer = { kind: 'rest', exercise: ex.name, i, total, endsAt: startAt + total * 1000 };
+  timerAlerted = state.draft.timer.endsAt <= Date.now();
+}
+
+function startRest(i) {
+  setRestTimer(i);
   unlockAudio(); // va fatto durante il tocco, altrimenti iOS non suona
   keepScreenOn(true);
-  saveDraft();
-  updateRestTimer();
+  timerChanged();
+}
+
+function startSetTimer(i, j) {
+  const ex = state.draft.exercises[i];
+  if (!exTimerOn(ex) || !ex.sets[j]) return;
+  const total = ex.timer.seconds;
+  state.draft.timer = { kind: 'set', exercise: ex.name, i, j, total, endsAt: Date.now() + total * 1000 };
+  timerAlerted = false;
+  unlockAudio();
+  keepScreenOn(true);
+  timerChanged();
 }
 
 function adjustRest(delta) {
   const t = state.draft && state.draft.timer;
-  if (!t) return;
+  if (!t || t.kind === 'set') return;
   const remaining = (t.endsAt - Date.now()) / 1000;
   if (remaining <= 0) return;
   const next = Math.max(0, remaining + delta);
   t.endsAt = Date.now() + next * 1000;
   t.total = Math.max(t.total + delta, next, 1);
   saveDraft();
-  updateRestTimer();
+  updateTimer();
 }
 
-function stopRest() {
-  if (state.draft) { state.draft.timer = null; saveDraft(); }
-  updateRestTimer();
+function stopTimer() {
+  if (state.draft) state.draft.timer = null;
+  timerChanged();
 }
 
-/** Aggiorna la barra del timer (chiamata ogni 250 ms mentre è attivo). */
-function updateRestTimer() {
-  const el = $('#rest-timer');
+/** Serie a tempo finita: la segno come fatta e parte il recupero dall'ora di fine. */
+function completeSetTimer(t) {
+  const ex = state.draft.exercises[t.i];
+  if (ex && ex.sets[t.j]) ex.sets[t.j].done = true;
+  if (ex) setRestTimer(t.i, t.endsAt); else state.draft.timer = null;
+  saveDraft();
+  render();
+}
+
+/** Tiene allineati gli indici del timer quando si tolgono esercizi o serie. */
+function shiftTimerAfterRemoval(i, j = null) {
   const t = state.draft && state.draft.timer;
+  if (!t) return;
+  if (j === null) {                         // tolto l'esercizio i
+    if (t.i === i) state.draft.timer = null;
+    else if (t.i > i) t.i -= 1;
+  } else if (t.kind === 'set' && t.i === i && t.j === j) {
+    state.draft.timer = null;               // tolta la serie che stava andando
+  }
+}
+
+function setText(el, text) { if (el.textContent !== text) el.textContent = text; }
+
+/** Aggiorna il timer. Tutto è calcolato da endsAt; si richiama da solo finché serve. */
+function updateTimer() {
+  cancelAnimationFrame(timerFrame); timerFrame = null;
+  clearTimeout(timerEndTimeout); timerEndTimeout = null;
+  const el = $('#rest-timer');
   const now = Date.now();
-  if (!t || now - t.endsAt > REST_SHOW_FINISHED_MS) {
+  let t = state.draft && state.draft.timer;
+
+  if (t && t.kind === 'set' && now >= t.endsAt) {
+    if (now - t.endsAt < TIMER_SOUND_GRACE_MS) alertDone();
+    completeSetTimer(t);
+    t = state.draft.timer;
+  }
+  if (!t || now - t.endsAt > TIMER_SHOW_FINISHED_MS) {
     if (t) { state.draft.timer = null; saveDraft(); }
     el.hidden = true;
     document.body.classList.remove('has-timer');
-    clearInterval(restTick); restTick = null;
     keepScreenOn(false);
     return;
   }
+
   const remaining = (t.endsAt - now) / 1000;
   const finished = remaining <= 0;
+  const isSet = t.kind === 'set';
   el.hidden = false;
   document.body.classList.add('has-timer');
   el.classList.toggle('finished', finished);
-  $('#rt-label').textContent = finished ? 'Recupero finito' : `Recupero · ${t.exercise}`;
-  $('#rt-time').textContent = finished ? 'Via!' : fmtDur(remaining);
+  el.classList.toggle('is-set', isSet);
+  setText($('#rt-label'), isSet ? `${t.exercise} · serie ${t.j + 1}` : finished ? 'Recupero finito' : `Recupero · ${t.exercise}`);
+  setText($('#rt-time'), finished ? 'Via!' : fmtDur(remaining));
   $('#rt-bar').style.transform = `scaleX(${finished ? 0 : Math.min(1, remaining / t.total)})`;
-  if (finished && !restAlerted) {
-    restAlerted = true;
-    alertRestDone();
+  if (finished && !timerAlerted) {
+    timerAlerted = true;
+    alertDone();
     keepScreenOn(false);
   }
-  if (!restTick) restTick = setInterval(updateRestTimer, 250);
+
+  timerFrame = requestAnimationFrame(updateTimer);
+  const deadline = finished ? t.endsAt + TIMER_SHOW_FINISHED_MS : t.endsAt;
+  timerEndTimeout = setTimeout(updateTimer, Math.max(0, deadline - now) + 20);
 }
 
 function unlockAudio() {
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
+    if (audioCtx && audioCtx.state === 'running') return; // già sbloccato
     if (!audioCtx) audioCtx = new Ctx();
     if (audioCtx.state !== 'running') audioCtx.resume();
     // Un suono muto durante il tocco "sblocca" l'audio su iOS.
@@ -467,7 +542,7 @@ function unlockAudio() {
   } catch { /* audio non disponibile */ }
 }
 
-function alertRestDone() {
+function alertDone() {
   try { navigator.vibrate && navigator.vibrate([200, 100, 200, 100, 300]); } catch { /* non supportato */ }
   try {
     if (!audioCtx) return;
@@ -520,7 +595,7 @@ function renderSchede() {
       <article class="card plan-card">
         <h2>${esc(p.name)}</h2>
         <p class="ex-list">${p.exercises.length
-          ? p.exercises.map(ex => `${esc(ex.name)} <span class="num">${esc(planSetsText(ex.sets))}</span>`).join('<br>')
+          ? p.exercises.map(ex => `${esc(ex.name)} <span class="num">${esc(planSetsText(ex.sets))}${exTimerOn(ex) ? ` · timer ${fmtDur(ex.timer.seconds)}` : ''}</span>`).join('<br>')
           : 'Nessun esercizio'}</p>
         <div class="actions">
           <button type="button" class="btn primary small" data-action="start" data-plan="${esc(p.id)}">Inizia</button>
@@ -567,6 +642,16 @@ function renderEditor() {
           <button type="button" data-action="ed-rest" data-k="${k}" data-delta="${Model.REST.step}" aria-label="Aumenta recupero di ${Model.REST.step} secondi" ${ex.rest >= Model.REST.max ? 'disabled' : ''}>+${Model.REST.step}s</button>
         </div>
       </div>
+      <div class="timer-row">
+        <label class="switch-row">
+          <span class="rest-label">${ICON.timer} Timer</span>
+          <input type="checkbox" role="switch" class="switch" data-efield="timer-enabled" data-k="${k}" ${ex.timer.enabled ? 'checked' : ''}
+            aria-label="Timer per ${esc(ex.name || `esercizio ${k + 1}`)} (esercizi a tempo)">
+        </label>
+        ${ex.timer.enabled ? `
+        <label class="field timer-seconds"><span>Durata (secondi)</span>
+          <input type="text" inputmode="numeric" autocomplete="off" data-efield="timer-seconds" data-k="${k}" value="${esc(ex.timer.seconds)}" placeholder="30"></label>` : ''}
+      </div>
     </div>`).join('');
 
   return `
@@ -584,13 +669,14 @@ function renderEditor() {
     </div>`;
 }
 
-const blankEditorExercise = () => ({ id: uid(), name: '', rest: Model.REST.default, sets: Array.from({ length: 3 }, () => ({ reps: '10', weight: '' })) });
+const blankEditorExercise = () => ({ id: uid(), name: '', rest: Model.REST.default, timer: { enabled: false, seconds: String(Model.TIMER.seconds) }, sets: Array.from({ length: 3 }, () => ({ reps: '10', weight: '' })) });
 
 function openEditor(planId) {
   const p = state.plans.find(x => x.id === planId);
   state.editor = p
     ? { id: p.id, name: p.name, exercises: p.exercises.map(ex => ({
         id: ex.id || uid(), name: ex.name, rest: restOf(ex),
+        timer: (tm => ({ enabled: tm.enabled, seconds: String(tm.seconds) }))(Model.cleanTimer(ex.timer)),
         sets: ex.sets.map(s => ({ reps: String(s.reps), weight: fmtKgInput(s.weight) })),
       })) }
     : { id: null, name: '', exercises: [blankEditorExercise()] };
@@ -604,7 +690,7 @@ async function saveEditor() {
   if (!name) return toast('Dai un nome alla scheda.');
   const exercises = e.exercises
     .filter(ex => ex.name.trim())
-    .map(ex => Model.migratePlanExercise({ id: ex.id, name: ex.name, sets: ex.sets, rest: ex.rest })); // pulisce i valori (rip ≥ 1, kg ≥ 0)
+    .map(ex => Model.migratePlanExercise({ id: ex.id, name: ex.name, sets: ex.sets, rest: ex.rest, timer: ex.timer })); // pulisce i valori (rip ≥ 1, kg ≥ 0)
   if (!exercises.length) return toast('Aggiungi almeno un esercizio.');
   const plan = { id: e.id || uid(), name, exercises };
   const plans = e.id ? state.plans.map(p => p.id === e.id ? plan : p) : [...state.plans, plan];
@@ -620,7 +706,10 @@ async function addExamplePlans() {
   const toAdd = EXAMPLE_PLANS.filter(p => !existing.has(norm(p.name))).map(p => ({
     id: uid(),
     name: p.name,
-    exercises: p.exercises.map(([name, sets]) => ({ id: uid(), name, sets: sets.map(([reps, weight]) => ({ reps, weight })) })),
+    exercises: p.exercises.map(([name, sets, opt = {}]) => Model.migratePlanExercise({
+      id: uid(), name, sets: sets.map(([reps, weight]) => ({ reps, weight })),
+      timer: opt.timer ? { enabled: true, seconds: opt.timer } : undefined,
+    })),
   }));
   if (!toAdd.length) return toast('Gli esempi sono già presenti.');
   const plans = [...state.plans, ...toAdd];
@@ -929,16 +1018,17 @@ const ACTIONS = {
   },
   'set-remove': el => {
     const ex = state.draft.exercises[+el.dataset.i];
-    if (ex.sets.length > 1) ex.sets.pop();
-    saveDraft(); render();
+    if (ex.sets.length > 1) { shiftTimerAfterRemoval(+el.dataset.i, ex.sets.length - 1); ex.sets.pop(); }
+    saveDraft(); render(); updateTimer();
   },
   'ex-remove': el => {
     const i = +el.dataset.i;
     const ex = state.draft.exercises[i];
     if (ex.sets.some(s => s.done) && !confirmTwice(`ex-${i}`)) return;
+    shiftTimerAfterRemoval(i);
     state.draft.exercises.splice(i, 1);
     state.confirm = null;
-    saveDraft(); render();
+    saveDraft(); render(); updateTimer();
   },
   'finish': () => {
     const pending = state.draft.exercises.reduce((n, ex) => n + ex.sets.filter(s => !s.done).length, 0);
@@ -948,7 +1038,7 @@ const ACTIONS = {
   'discard': () => {
     if (!confirmTwice('discard')) return;
     state.draft = null;
-    saveDraft(); render(); updateRestTimer();
+    saveDraft(); render(); updateTimer();
     toast('Allenamento annullato.');
   },
   'summary-close': () => { state.summary = null; render(); },
@@ -977,7 +1067,9 @@ const ACTIONS = {
   },
   'rest-start': el => startRest(+el.dataset.i),
   'rest-adjust': el => adjustRest(Number(el.dataset.delta)),
-  'rest-stop': () => stopRest(),
+  'rest-stop': () => stopTimer(),
+  'set-timer': el => startSetTimer(+el.dataset.i, +el.dataset.j),
+  'timer-stop': () => stopTimer(),
   'ed-remove-ex': el => { state.editor.exercises.splice(+el.dataset.k, 1); render(); },
   'ed-add-set': el => {
     const sets = state.editor.exercises[+el.dataset.k].sets;
@@ -1028,6 +1120,10 @@ function updateDraftProgress() {
   }
 }
 
+// iOS sblocca l'audio solo durante un tocco: lo faccio al primo tocco utile,
+// così il suono di fine funziona anche se l'app è stata riaperta a timer avviato.
+document.addEventListener('pointerdown', unlockAudio, { passive: true });
+
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-action]');
   if (!el || el.disabled) return;
@@ -1052,6 +1148,11 @@ document.addEventListener('input', e => {
   // Editor della scheda
   if (t.dataset.efield && state.editor) {
     if (t.dataset.efield === 'plan-name') state.editor.name = t.value;
+    else if (t.dataset.efield === 'timer-enabled') {
+      state.editor.exercises[+t.dataset.k].timer.enabled = t.checked;
+      render(); // mostra/nasconde il campo durata
+    }
+    else if (t.dataset.efield === 'timer-seconds') state.editor.exercises[+t.dataset.k].timer.seconds = t.value;
     else if (t.dataset.s !== undefined) state.editor.exercises[+t.dataset.k].sets[+t.dataset.s][t.dataset.efield] = t.value;
     else state.editor.exercises[+t.dataset.k][t.dataset.efield] = t.value;
   }
@@ -1094,7 +1195,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     checkForUpdate();
     if (state.draft && state.draft.timer) {
-      updateRestTimer();
+      updateTimer();
       if (!state.draft || !state.draft.timer) return;
       if (state.draft.timer.endsAt > Date.now()) keepScreenOn(true); // il blocco schermo si perde in background
     }
@@ -1153,8 +1254,8 @@ async function registerServiceWorker() {
     toast('Impossibile leggere i dati salvati.');
   }
   showView('oggi');
-  if (state.draft && state.draft.timer) restAlerted = state.draft.timer.endsAt <= Date.now();
-  updateRestTimer();
+  if (state.draft && state.draft.timer) timerAlerted = state.draft.timer.endsAt <= Date.now();
+  updateTimer();
   Store.requestPersistence();
   registerServiceWorker();
 })();

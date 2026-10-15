@@ -22,7 +22,8 @@ const Store = (() => {
     draft: 'diarioPalestra.draft',
     lastBackup: 'diarioPalestra.lastBackup',
     dataVersion: 'diarioPalestra.dataVersion',
-    plansV1Copy: 'diarioPalestra.plans.v1', // copia di sicurezza prima della migrazione
+    // Copia di sicurezza prima di ogni migrazione: diarioPalestra.plans.v1, .v2, …
+    plansCopy: version => `diarioPalestra.plans.v${version}`,
   };
 
   function read(key, fallback) {
@@ -53,8 +54,8 @@ const Store = (() => {
       const version = read(KEYS.dataVersion, 1);
       if (version < Model.DATA_VERSION) {
         // Migrazione automatica delle schede (le sessioni restano com'erano).
-        if (Array.isArray(plans) && plans.length && localStorage.getItem(KEYS.plansV1Copy) === null) {
-          write(KEYS.plansV1Copy, plans);
+        if (Array.isArray(plans) && plans.length && localStorage.getItem(KEYS.plansCopy(version)) === null) {
+          write(KEYS.plansCopy(version), plans);
         }
         plans = Model.migratePlans(plans);
         write(KEYS.plans, plans);

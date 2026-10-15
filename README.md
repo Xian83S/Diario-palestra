@@ -61,6 +61,15 @@ Limiti di iPhone da sapere:
 - La vibrazione non è disponibile su iPhone per le app web.
 - Mentre il recupero è in corso l'app chiede di tenere lo schermo acceso (su iOS recenti).
 
+## Timer per esercizi a tempo (plank, isometrie)
+
+- In **Schede**, per ogni esercizio, c'è l'interruttore **Timer** (spento di default). Se lo accendi compare **Durata (secondi)**.
+- Durante l'allenamento, se il timer è acceso e la durata è maggiore di 0, ogni serie di quell'esercizio mostra **Avvia timer**. Con il timer spento o con durata 0 non compare nessun pulsante.
+- Alla fine del conto alla rovescia l'app suona, segna la serie come fatta e fa partire subito il recupero dell'esercizio.
+- **Ferma timer** interrompe il conto senza segnare la serie.
+- Il tempo è calcolato dall'ora di fine. Se chiudi l'app durante una serie, alla riapertura la serie risulta fatta e il recupero mostra il tempo giusto, come se fosse partito alla fine della serie.
+- Dopo che l'app è stata riaperta, iPhone fa suonare solo dopo un tocco sullo schermo: basta toccare un punto qualsiasi.
+
 ## Backup: importante
 
 iOS può cancellare i dati dei siti e delle app web che non usi per un po' di tempo. Per non perdere lo storico:
@@ -74,9 +83,10 @@ iOS può cancellare i dati dei siti e delle app web che non usi per un po' di te
 Il formato dei dati ha un numero di versione (`Model.DATA_VERSION` in `model.js`), che viene scritto anche nei backup esportati.
 
 - **Versione 1:** ogni esercizio di una scheda aveva `sets`, `reps` e `weight` unici (es. 4 serie da 8 a 60 kg).
-- **Versione 2:** ogni serie ha le proprie ripetizioni e il proprio peso: `sets: [{reps: 10, weight: 55}, {reps: 8, weight: 60}, …]`.
+- **Versione 2:** ogni serie ha le proprie ripetizioni e il proprio peso: `sets: [{reps: 10, weight: 55}, {reps: 8, weight: 60}, …]`, più il recupero `rest` in secondi.
+- **Versione 3:** ogni esercizio ha anche `timer: {enabled, seconds}` per gli esercizi a tempo. Per le schede esistenti vale `{enabled: false, seconds: 30}`.
 
-All'apertura l'app converte da sola le schede vecchie: 4×8 a 60 kg diventa 4 serie identiche da 8 a 60 kg. Prima della conversione salva una copia delle schede originali (`diarioPalestra.plans.v1`). Le sessioni già registrate non vengono toccate. Anche i backup vecchi, compresi quelli senza numero di versione, vengono convertiti all'importazione. Un backup creato da una versione più recente dell'app viene rifiutato.
+All'apertura l'app converte da sola le schede vecchie: 4×8 a 60 kg diventa 4 serie identiche da 8 a 60 kg. Prima di ogni conversione salva una copia delle schede com'erano (`diarioPalestra.plans.v1`, `diarioPalestra.plans.v2`, …). Le sessioni già registrate non vengono toccate. Anche i backup vecchi, compresi quelli senza numero di versione, vengono convertiti all'importazione. Un backup creato da una versione più recente dell'app viene rifiutato.
 
 ## Pubblicare una modifica
 
