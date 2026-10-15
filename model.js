@@ -7,14 +7,17 @@
  *   2 — esercizio di una scheda: {id, name, sets: [{reps: 8, weight: 60}, …]}
  *       (ogni serie ha le proprie ripetizioni e il proprio peso)
  *       + campo facoltativo `rest`: secondi di recupero tra le serie (predefinito 90).
- *         Se manca viene aggiunto con il valore predefinito, senza cambiare versione.
+ *   3 — come la 2, più `timer: {enabled, seconds}` per gli esercizi a tempo
+ *       (plank, isometrie). Predefinito: {enabled: false, seconds: 30}.
+ * Tutti i campi mancanti vengono completati con i valori predefiniti.
  * Le sessioni registrate non cambiano tra le versioni.
  */
 const Model = (() => {
-  const DATA_VERSION = 2;
+  const DATA_VERSION = 3;
   const DEFAULT_REPS = 10;
   const DEFAULT_SETS = 3;
   const REST = { default: 90, min: 15, max: 600, step: 15 }; // secondi
+  const TIMER = { seconds: 30, max: 3600 };                   // secondi
 
   const num = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
   const cleanReps = v => { const n = Math.round(num(v)); return n >= 1 ? n : DEFAULT_REPS; };
@@ -23,9 +26,18 @@ const Model = (() => {
     const n = Math.round(num(v));
     return Number.isFinite(n) && n > 0 ? Math.min(REST.max, Math.max(REST.min, n)) : REST.default;
   };
+  /** Timer dell'esercizio: acceso solo se enabled === true; durata intera 0…3600 s. */
+  const cleanTimer = t => {
+    const obj = t && typeof t === 'object' ? t : {};
+    const n = Math.round(num(obj.seconds));
+    return {
+      enabled: obj.enabled === true,
+      seconds: Number.isFinite(n) && n >= 0 ? Math.min(TIMER.max, n) : TIMER.seconds,
+    };
+  };
   const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
-  /** Porta un esercizio di scheda (v1 o v2) al formato v2. Restituisce null se non valido. */
+  /** Porta un esercizio di scheda (v1, v2 o v3) al formato attuale. Restituisce null se non valido. */
   function migratePlanExercise(ex) {
     if (!ex || typeof ex !== 'object' || !String(ex.name ?? '').trim()) return null;
     let sets;
@@ -40,10 +52,10 @@ const Model = (() => {
       sets = Array.from({ length: count }, () => ({ ...set }));
     }
     if (!sets.length) sets = [{ reps: DEFAULT_REPS, weight: 0 }];
-    return { id: String(ex.id || newId()), name: String(ex.name).trim(), sets, rest: cleanRest(ex.rest) };
+    return { id: String(ex.id || newId()), name: String(ex.name).trim(), sets, rest: cleanRest(ex.rest), timer: cleanTimer(ex.timer) };
   }
 
-  /** Porta una scheda al formato v2. Restituisce null se non valida. */
+  /** Porta una scheda al formato attuale. Restituisce null se non valida. */
   function migratePlan(p) {
     if (!p || typeof p !== 'object' || !String(p.name ?? '').trim()) return null;
     const exercises = (Array.isArray(p.exercises) ? p.exercises : []).map(migratePlanExercise).filter(Boolean);
@@ -54,5 +66,5 @@ const Model = (() => {
     return (Array.isArray(plans) ? plans : []).map(migratePlan).filter(Boolean);
   }
 
-  return { DATA_VERSION, REST, cleanRest, migratePlan, migratePlans, migratePlanExercise };
+  return { DATA_VERSION, REST, TIMER, cleanRest, cleanTimer, migratePlan, migratePlans, migratePlanExercise };
 })();
