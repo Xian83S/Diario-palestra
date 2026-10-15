@@ -49,6 +49,18 @@ Il codice è già su GitHub, quindi questa è la strada più breve. L'indirizzo 
 
 > I dati salvati dall'icona sulla Home e quelli salvati da Safari sono **separati**. Usa sempre l'icona.
 
+## Timer di recupero
+
+- In **Schede** ogni esercizio ha il suo tempo di recupero, regolabile da 0:15 a 10:00 a passi di 15 secondi (predefinito 1:30).
+- Durante l'allenamento il timer parte **solo** quando tocchi **Recupero** sotto l'esercizio. Durante il conteggio puoi togliere o aggiungere 15 secondi, oppure chiuderlo con ✕.
+- Alla fine il riquadro diventa giallo con scritto **"Via!"** e l'app suona tre bip.
+- Il timer resta salvato con l'allenamento in corso: se chiudi l'app e la riapri, riprende dal tempo giusto.
+
+Limiti di iPhone da sapere:
+- I bip suonano solo se l'app è **aperta sullo schermo** e la suoneria non è in modalità silenziosa. Con il telefono bloccato o l'app in background iOS non lascia suonare un'app web. Quando torni nell'app, il timer mostra comunque il tempo giusto.
+- La vibrazione non è disponibile su iPhone per le app web.
+- Mentre il recupero è in corso l'app chiede di tenere lo schermo acceso (su iOS recenti).
+
 ## Backup: importante
 
 iOS può cancellare i dati dei siti e delle app web che non usi per un po' di tempo. Per non perdere lo storico:

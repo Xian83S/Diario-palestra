@@ -39,11 +39,14 @@ const setsVolume = sets => sets.reduce((sum, s) => sum + s.kg * s.reps, 0);
 const sessionVolume = session => session.exercises.reduce((sum, ex) => sum + setsVolume(ex.sets), 0);
 const sessionSetCount = session => session.exercises.reduce((sum, ex) => sum + ex.sets.length, 0);
 const setsText = sets => sets.map(s => `${fmt(s.kg, 2)}×${s.reps}`).join(' · ');
+const fmtDur = sec => { sec = Math.max(0, Math.ceil(sec)); return `${Math.floor(sec / 60)}:${pad(sec % 60)}`; };
+const restOf = ex => Model.cleanRest(ex && ex.rest);
 
 const ICON = {
   check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   chev: '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
+  timer: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 1.5M9.5 2.5h5"/></svg>',
 };
 
 /* ---------- Stato ---------- */
@@ -236,6 +239,9 @@ function renderDraft() {
           <button type="button" class="btn small" data-action="set-remove" data-i="${i}" ${ex.sets.length <= 1 ? 'disabled' : ''}>− Serie</button>
           <button type="button" class="btn small soft" data-action="set-add" data-i="${i}">+ Serie</button>
         </div>
+        <button type="button" class="btn small block rest-btn" data-action="rest-start" data-i="${i}">
+          ${ICON.timer}<span>Recupero <span class="num">${fmtDur(restOf(ex))}</span></span>
+        </button>
       </article>`;
   }).join('');
 
@@ -302,8 +308,10 @@ function startWorkout(planId) {
     createdAt: new Date().toISOString(),
     exercises: plan ? plan.exercises.map(ex => ({
       name: ex.name,
+      rest: restOf(ex),
       sets: planSetsToDraft(ex.sets),
     })) : [],
+    timer: null,
   };
   state.summary = null;
   saveDraft();
@@ -320,7 +328,7 @@ function addDraftExercise(name) {
   if (last) sets = last.sets.map(s => ({ kg: fmtKgInput(s.kg), reps: String(s.reps), done: false }));
   else if (fromPlan) sets = planSetsToDraft(fromPlan.sets);
   else sets = Array.from({ length: 3 }, () => ({ kg: '', reps: '', done: false }));
-  state.draft.exercises.push({ name, sets });
+  state.draft.exercises.push({ name, rest: restOf(fromPlan), sets });
   saveDraft();
   render();
 }
@@ -368,10 +376,127 @@ async function finishWorkout() {
   await Store.saveDraft(null);
   state.sessions.push(session);
   state.draft = null;
+  updateRestTimer();
   state.summary = { session, sets: sessionSetCount(session), volume: sessionVolume(session), records };
   state.progress.exercise = '';
   render();
   window.scrollTo(0, 0);
+}
+
+/* =========================================================================
+   TIMER DI RECUPERO
+   Lo stato sta nella bozza (draft.timer = {exercise, total, endsAt}), così
+   sopravvive alla chiusura dell'app. Il tempo si calcola da endsAt, quindi
+   resta giusto anche se iOS sospende l'app.
+   ========================================================================= */
+const REST_SHOW_FINISHED_MS = 20000; // quanto resta visibile "Recupero finito"
+let restTick = null;
+let restAlerted = false;
+let audioCtx = null;
+let wakeLock = null;
+
+function startRest(i) {
+  const ex = state.draft.exercises[i];
+  const total = restOf(ex);
+  state.draft.timer = { exercise: ex.name, total, endsAt: Date.now() + total * 1000 };
+  restAlerted = false;
+  unlockAudio(); // va fatto durante il tocco, altrimenti iOS non suona
+  keepScreenOn(true);
+  saveDraft();
+  updateRestTimer();
+}
+
+function adjustRest(delta) {
+  const t = state.draft && state.draft.timer;
+  if (!t) return;
+  const remaining = (t.endsAt - Date.now()) / 1000;
+  if (remaining <= 0) return;
+  const next = Math.max(0, remaining + delta);
+  t.endsAt = Date.now() + next * 1000;
+  t.total = Math.max(t.total + delta, next, 1);
+  saveDraft();
+  updateRestTimer();
+}
+
+function stopRest() {
+  if (state.draft) { state.draft.timer = null; saveDraft(); }
+  updateRestTimer();
+}
+
+/** Aggiorna la barra del timer (chiamata ogni 250 ms mentre è attivo). */
+function updateRestTimer() {
+  const el = $('#rest-timer');
+  const t = state.draft && state.draft.timer;
+  const now = Date.now();
+  if (!t || now - t.endsAt > REST_SHOW_FINISHED_MS) {
+    if (t) { state.draft.timer = null; saveDraft(); }
+    el.hidden = true;
+    document.body.classList.remove('has-timer');
+    clearInterval(restTick); restTick = null;
+    keepScreenOn(false);
+    return;
+  }
+  const remaining = (t.endsAt - now) / 1000;
+  const finished = remaining <= 0;
+  el.hidden = false;
+  document.body.classList.add('has-timer');
+  el.classList.toggle('finished', finished);
+  $('#rt-label').textContent = finished ? 'Recupero finito' : `Recupero · ${t.exercise}`;
+  $('#rt-time').textContent = finished ? 'Via!' : fmtDur(remaining);
+  $('#rt-bar').style.transform = `scaleX(${finished ? 0 : Math.min(1, remaining / t.total)})`;
+  if (finished && !restAlerted) {
+    restAlerted = true;
+    alertRestDone();
+    keepScreenOn(false);
+  }
+  if (!restTick) restTick = setInterval(updateRestTimer, 250);
+}
+
+function unlockAudio() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state !== 'running') audioCtx.resume();
+    // Un suono muto durante il tocco "sblocca" l'audio su iOS.
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0;
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + 0.01);
+  } catch { /* audio non disponibile */ }
+}
+
+function alertRestDone() {
+  try { navigator.vibrate && navigator.vibrate([200, 100, 200, 100, 300]); } catch { /* non supportato */ }
+  try {
+    if (!audioCtx) return;
+    if (audioCtx.state !== 'running') audioCtx.resume();
+    const t0 = audioCtx.currentTime + 0.05;
+    [0, 0.3, 0.6].forEach((offset, n) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.frequency.value = n === 2 ? 1320 : 880;
+      gain.gain.setValueAtTime(0.0001, t0 + offset);
+      gain.gain.exponentialRampToValueAtTime(0.5, t0 + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + offset + 0.2);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t0 + offset); osc.stop(t0 + offset + 0.22);
+    });
+  } catch { /* audio non disponibile */ }
+}
+
+/** Tiene lo schermo acceso durante il recupero, dove supportato. */
+async function keepScreenOn(on) {
+  try {
+    if (on && !wakeLock && navigator.wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!on && wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch { wakeLock = null; }
 }
 
 /* =========================================================================
@@ -434,6 +559,14 @@ function renderEditor() {
         </div>`).join('')}
       </div>
       <button type="button" class="btn small soft" data-action="ed-add-set" data-k="${k}">+ Serie</button>
+      <div class="rest-row">
+        <span class="rest-label">${ICON.timer} Recupero</span>
+        <div class="stepper" role="group" aria-label="Recupero tra le serie">
+          <button type="button" data-action="ed-rest" data-k="${k}" data-delta="-${Model.REST.step}" aria-label="Riduci recupero di ${Model.REST.step} secondi" ${ex.rest <= Model.REST.min ? 'disabled' : ''}>−${Model.REST.step}s</button>
+          <output class="num" aria-live="polite">${fmtDur(ex.rest)}</output>
+          <button type="button" data-action="ed-rest" data-k="${k}" data-delta="${Model.REST.step}" aria-label="Aumenta recupero di ${Model.REST.step} secondi" ${ex.rest >= Model.REST.max ? 'disabled' : ''}>+${Model.REST.step}s</button>
+        </div>
+      </div>
     </div>`).join('');
 
   return `
@@ -451,13 +584,13 @@ function renderEditor() {
     </div>`;
 }
 
-const blankEditorExercise = () => ({ id: uid(), name: '', sets: Array.from({ length: 3 }, () => ({ reps: '10', weight: '' })) });
+const blankEditorExercise = () => ({ id: uid(), name: '', rest: Model.REST.default, sets: Array.from({ length: 3 }, () => ({ reps: '10', weight: '' })) });
 
 function openEditor(planId) {
   const p = state.plans.find(x => x.id === planId);
   state.editor = p
     ? { id: p.id, name: p.name, exercises: p.exercises.map(ex => ({
-        id: ex.id || uid(), name: ex.name,
+        id: ex.id || uid(), name: ex.name, rest: restOf(ex),
         sets: ex.sets.map(s => ({ reps: String(s.reps), weight: fmtKgInput(s.weight) })),
       })) }
     : { id: null, name: '', exercises: [blankEditorExercise()] };
@@ -471,7 +604,7 @@ async function saveEditor() {
   if (!name) return toast('Dai un nome alla scheda.');
   const exercises = e.exercises
     .filter(ex => ex.name.trim())
-    .map(ex => Model.migratePlanExercise({ id: ex.id, name: ex.name, sets: ex.sets })); // pulisce i valori (rip ≥ 1, kg ≥ 0)
+    .map(ex => Model.migratePlanExercise({ id: ex.id, name: ex.name, sets: ex.sets, rest: ex.rest })); // pulisce i valori (rip ≥ 1, kg ≥ 0)
   if (!exercises.length) return toast('Aggiungi almeno un esercizio.');
   const plan = { id: e.id || uid(), name, exercises };
   const plans = e.id ? state.plans.map(p => p.id === e.id ? plan : p) : [...state.plans, plan];
@@ -815,7 +948,7 @@ const ACTIONS = {
   'discard': () => {
     if (!confirmTwice('discard')) return;
     state.draft = null;
-    saveDraft(); render();
+    saveDraft(); render(); updateRestTimer();
     toast('Allenamento annullato.');
   },
   'summary-close': () => { state.summary = null; render(); },
@@ -837,6 +970,14 @@ const ACTIONS = {
     const inputs = document.querySelectorAll('[data-efield="name"]');
     inputs[inputs.length - 1]?.focus();
   },
+  'ed-rest': el => {
+    const ex = state.editor.exercises[+el.dataset.k];
+    ex.rest = Model.cleanRest(ex.rest + Number(el.dataset.delta));
+    render();
+  },
+  'rest-start': el => startRest(+el.dataset.i),
+  'rest-adjust': el => adjustRest(Number(el.dataset.delta)),
+  'rest-stop': () => stopRest(),
   'ed-remove-ex': el => { state.editor.exercises.splice(+el.dataset.k, 1); render(); },
   'ed-add-set': el => {
     const sets = state.editor.exercises[+el.dataset.k].sets;
@@ -950,7 +1091,14 @@ document.addEventListener('keydown', e => {
 // Prima di chiudere/nascondere l'app, salvo subito la bozza.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && state.draft) saveDraft();
-  if (document.visibilityState === 'visible') checkForUpdate();
+  if (document.visibilityState === 'visible') {
+    checkForUpdate();
+    if (state.draft && state.draft.timer) {
+      updateRestTimer();
+      if (!state.draft || !state.draft.timer) return;
+      if (state.draft.timer.endsAt > Date.now()) keepScreenOn(true); // il blocco schermo si perde in background
+    }
+  }
 });
 
 let resizeTimer;
@@ -1005,6 +1153,8 @@ async function registerServiceWorker() {
     toast('Impossibile leggere i dati salvati.');
   }
   showView('oggi');
+  if (state.draft && state.draft.timer) restAlerted = state.draft.timer.endsAt <= Date.now();
+  updateRestTimer();
   Store.requestPersistence();
   registerServiceWorker();
 })();

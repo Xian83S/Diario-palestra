@@ -319,3 +319,54 @@ table.sets-table td.sets-col { color: var(--muted); }
   * { transition: none !important; }
   .btn:active { transform: none; }
 }
+
+/* ---------- Recupero: pulsante, stepper e timer ---------- */
+.ico { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.rest-btn { margin-top: 8px; color: var(--accent); }
+.rest-btn .num { font-size: 1.15rem; font-weight: 700; margin-left: 2px; }
+
+.rest-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.rest-label { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--muted); }
+.stepper { display: inline-flex; align-items: center; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 3px; }
+.stepper button {
+  min-width: 56px; min-height: 44px; border: 0; border-radius: 9px; background: var(--surface);
+  color: var(--accent); font-weight: 600; font-size: 1rem; cursor: pointer; touch-action: manipulation; box-shadow: var(--shadow);
+}
+.stepper button:disabled { opacity: 0.35; cursor: default; }
+.stepper output { min-width: 64px; text-align: center; font-size: 1.4rem; font-weight: 700; }
+
+.rest-timer {
+  position: fixed; left: 12px; right: 12px; z-index: 25;
+  bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 10px);
+  max-width: 616px; margin: 0 auto; overflow: hidden;
+  background: var(--accent); color: var(--accent-ink);
+  border-radius: 16px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+}
+.rest-timer.finished { background: var(--record-dot); color: #1a1300; animation: rt-pulse 1s ease-in-out 3; }
+.rt-progress { height: 4px; background: rgba(255, 255, 255, 0.25); }
+.rt-progress span { display: block; height: 100%; background: currentColor; transform-origin: left center; transition: transform .25s linear; }
+.rt-body { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 8px 8px 16px; }
+.rt-info { display: flex; flex-direction: column; min-width: 0; }
+.rt-label { font-size: 0.85rem; font-weight: 600; opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rt-time { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 2.2rem; line-height: 1; }
+.rt-actions { display: flex; gap: 6px; flex: none; }
+.rt-actions button {
+  min-width: 48px; height: 48px; border-radius: 12px; border: 0; cursor: pointer; touch-action: manipulation;
+  background: rgba(255, 255, 255, 0.18); color: inherit; font-family: var(--font-display); font-weight: 700; font-size: 1.15rem;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.rest-timer.finished .rt-actions button { background: rgba(0, 0, 0, 0.12); }
+.rest-timer.finished .rt-adjust { display: none; }
+.rt-stop svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; }
+@keyframes rt-pulse { 50% { transform: scale(1.02); } }
+
+/* Spazio per il timer sopra la barra in basso */
+body.has-timer main { padding-bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 112px); }
+body.has-timer .toast, body.has-timer .update-banner { bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 96px); }
+@media (prefers-color-scheme: dark) {
+  .rt-progress { background: rgba(0, 0, 0, 0.2); }
+  .rt-actions button { background: rgba(0, 0, 0, 0.15); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rest-timer.finished { animation: none; }
+}
