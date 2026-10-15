@@ -6,12 +6,14 @@
  * esterno (API, database remoto…) senza toccare app.js.
  *
  * Interfaccia:
- *   load()               -> { plans, sessions, draft }  (migra i dati vecchi, vedi model.js)
+ *   load()               -> { plans, sessions, draft, bodyWeights }  (migra i dati vecchi, vedi model.js)
  *   savePlans(plans)
  *   saveSession(session)  (inserisce o aggiorna per id)
  *   deleteSession(id)
  *   saveDraft(draft|null) (allenamento in corso; null = elimina)
- *   replaceAll({plans, sessions})  (usato dall'importazione backup)
+ *   saveBodyWeight(entry) (peso corporeo; sostituisce quello della stessa data)
+ *   deleteBodyWeight(id)
+ *   replaceAll({plans, sessions, bodyWeights})  (usato dall'importazione backup)
  *   getLastBackup() / markBackup()
  *   requestPersistence()
  */
@@ -20,6 +22,7 @@ const Store = (() => {
     plans: 'diarioPalestra.plans',
     sessions: 'diarioPalestra.sessions',
     draft: 'diarioPalestra.draft',
+    bodyWeights: 'diarioPalestra.bodyWeights',
     lastBackup: 'diarioPalestra.lastBackup',
     dataVersion: 'diarioPalestra.dataVersion',
     // Copia di sicurezza prima di ogni migrazione: diarioPalestra.plans.v1, .v2, …
@@ -68,6 +71,7 @@ const Store = (() => {
         plans: Array.isArray(plans) ? plans : [],
         sessions: Array.isArray(sessions) ? sessions : [],
         draft: read(KEYS.draft, null),
+        bodyWeights: Model.cleanBodyWeights(read(KEYS.bodyWeights, [])),
       };
     },
 
@@ -90,9 +94,20 @@ const Store = (() => {
       if (draft) write(KEYS.draft, draft); else remove(KEYS.draft);
     },
 
-    async replaceAll({ plans, sessions }) {
+    async saveBodyWeight(entry) {
+      const all = read(KEYS.bodyWeights, []).filter(w => w && w.date !== entry.date && w.id !== entry.id);
+      all.push(entry);
+      write(KEYS.bodyWeights, Model.cleanBodyWeights(all));
+    },
+
+    async deleteBodyWeight(id) {
+      write(KEYS.bodyWeights, read(KEYS.bodyWeights, []).filter(w => w && w.id !== id));
+    },
+
+    async replaceAll({ plans, sessions, bodyWeights }) {
       write(KEYS.plans, plans);
       write(KEYS.sessions, sessions);
+      if (bodyWeights) write(KEYS.bodyWeights, bodyWeights);
     },
 
     async getLastBackup() {

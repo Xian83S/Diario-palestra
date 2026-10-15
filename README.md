@@ -70,6 +70,15 @@ Limiti di iPhone da sapere:
 - Il tempo è calcolato dall'ora di fine. Se chiudi l'app durante una serie, alla riapertura la serie risulta fatta e il recupero mostra il tempo giusto, come se fosse partito alla fine della serie.
 - Dopo che l'app è stata riaperta, iPhone fa suonare solo dopo un tocco sullo schermo: basta toccare un punto qualsiasi.
 
+## Peso corporeo
+
+- Si trova in **Progressi → Peso corporeo**.
+- **Registra il peso:** data (predefinita oggi) e kg, da 20 a 400. Si salva un valore per giorno: se la data ha già un peso, il pulsante diventa **Aggiorna peso** e il nuovo valore sostituisce il vecchio.
+- **Grafico:** filtrabile per 1 mese, 3 mesi o tutto. Le date sono distanziate in base ai giorni reali, quindi una pausa di due settimane si vede.
+- **Riquadri:** peso attuale, variazione nel periodo, media degli ultimi 7 giorni, minimo e massimo del periodo.
+- **Elenco:** ogni registrazione mostra la differenza rispetto alla precedente e si elimina con due tocchi.
+- **Backup:** i pesi sono inclusi nell'esportazione. All'importazione vengono uniti per data, e a parità di data vince il file importato. I backup vecchi, senza pesi, non toccano quelli che hai.
+
 ## Backup: importante
 
 iOS può cancellare i dati dei siti e delle app web che non usi per un po' di tempo. Per non perdere lo storico:
@@ -85,6 +94,7 @@ Il formato dei dati ha un numero di versione (`Model.DATA_VERSION` in `model.js`
 - **Versione 1:** ogni esercizio di una scheda aveva `sets`, `reps` e `weight` unici (es. 4 serie da 8 a 60 kg).
 - **Versione 2:** ogni serie ha le proprie ripetizioni e il proprio peso: `sets: [{reps: 10, weight: 55}, {reps: 8, weight: 60}, …]`, più il recupero `rest` in secondi.
 - **Versione 3:** ogni esercizio ha anche `timer: {enabled, seconds}` per gli esercizi a tempo. Per le schede esistenti vale `{enabled: false, seconds: 30}`.
+- **Versione 4:** nuova raccolta `bodyWeights` per il peso corporeo, `[{id, date, kg, createdAt}]`, con al massimo una registrazione per data. Viene inclusa nei backup.
 
 All'apertura l'app converte da sola le schede vecchie: 4×8 a 60 kg diventa 4 serie identiche da 8 a 60 kg. Prima di ogni conversione salva una copia delle schede com'erano (`diarioPalestra.plans.v1`, `diarioPalestra.plans.v2`, …). Le sessioni già registrate non vengono toccate. Anche i backup vecchi, compresi quelli senza numero di versione, vengono convertiti all'importazione. Un backup creato da una versione più recente dell'app viene rifiutato.
 
