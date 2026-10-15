@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Diario Palestra</title>
+  <meta name="description" content="Diario di allenamento: schede, serie, progressi e storico. Funziona offline.">
+
+  <!-- Modalità app su iPhone -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Palestra">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#EEF1F5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0E1116" media="(prefers-color-scheme: dark)">
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+
+  <link rel="preload" href="fonts/barlow-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/barlow-condensed-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="statusbar-bg" aria-hidden="true"></div>
+
+  <main id="app">
+    <section id="view-oggi" class="view" aria-labelledby="tab-oggi"></section>
+    <section id="view-schede" class="view" aria-labelledby="tab-schede" hidden></section>
+    <section id="view-progressi" class="view" aria-labelledby="tab-progressi" hidden></section>
+    <section id="view-storico" class="view" aria-labelledby="tab-storico" hidden></section>
+  </main>
+
+  <div id="update-banner" class="update-banner" hidden>
+    <span>Nuova versione disponibile</span>
+    <button type="button" data-action="update-app">Aggiorna</button>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <nav class="tabbar" aria-label="Sezioni">
+    <button type="button" id="tab-oggi" class="tab" data-action="tab" data-view="oggi" aria-current="page">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6M6 6v12M18 6v12M21 9v6M6 12h12"/></svg>
+      <span>Oggi</span>
+    </button>
+    <button type="button" id="tab-schede" class="tab" data-action="tab" data-view="schede">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg>
+      <span>Schede</span>
+    </button>
+    <button type="button" id="tab-progressi" class="tab" data-action="tab" data-view="progressi">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M4 16l5-5 4 3 7-8"/></svg>
+      <span>Progressi</span>
+    </button>
+    <button type="button" id="tab-storico" class="tab" data-action="tab" data-view="storico">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+      <span>Storico</span>
+    </button>
+  </nav>
+
+  <input type="file" id="import-file" accept="application/json,.json" hidden>
+
+  <script src="storage.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
