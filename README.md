@@ -1,2 +1,87 @@
-# Diario-palestra
-To run palestra app
+# Diario Palestra
+
+Diario di allenamento da installare su iPhone: si apre dall'icona sulla Home, a schermo intero, e funziona anche senza connessione in palestra.
+È fatto solo di file statici, senza framework e senza passaggi di compilazione.
+
+## Cosa c'è nella cartella
+
+| File | A cosa serve |
+|---|---|
+| `index.html` | La pagina dell'app con i meta tag per la modalità app su iPhone |
+| `style.css` | Grafica: tema chiaro e scuro automatico, font Barlow / Barlow Condensed |
+| `app.js` | Interfaccia: Oggi, Schede, Progressi, Storico, backup |
+| `storage.js` | Livello di accesso ai dati (`load`, `savePlans`, `saveSession`, `deleteSession`, …). Oggi usa la memoria del telefono (localStorage). È l'unico file da sostituire per passare in futuro a un servizio esterno |
+| `sw.js` | Service worker: salva i file dell'app sul telefono per l'uso offline |
+| `manifest.webmanifest` | Nome, icone e modalità `standalone` dell'app |
+| `icons/` | Icone 180 (iPhone), 192, 512 px e favicon. `tools/make-icons.py` le rigenera |
+| `fonts/` | Font Barlow inclusi nei file (licenza SIL OFL in `fonts/OFL.txt`) |
+| `.nojekyll` | Dice a GitHub Pages di pubblicare i file così come sono |
+
+## Pubblicazione con GitHub Pages (consigliata)
+
+Il codice è già su GitHub, quindi questa è la strada più breve. L'indirizzo finale sarà
+**https://xian83s.github.io/Diario-palestra/**
+
+1. **Porta i file sul ramo `main`.** Su github.com apri il repository, poi *Pull requests* → apri (o crea) la pull request dal ramo `claude/diario-palestra-pwa-mxu97z` verso `main` → *Merge pull request* → *Confirm merge*.
+2. **Controlla la visibilità.** Con l'account gratuito GitHub Pages funziona solo con i repository **pubblici**. Se il repository è privato: *Settings* → in fondo *Danger Zone* → *Change visibility* → *Public*. Se preferisci tenerlo privato, usa Netlify (sezione sotto).
+   I tuoi allenamenti **non** finiscono nel repository: restano sul telefono. Nel repository c'è solo il codice dell'app.
+3. **Attiva Pages.** *Settings* → *Pages* (menu a sinistra) → in *Build and deployment*, *Source*: **Deploy from a branch** → *Branch*: **main** e cartella **/ (root)** → *Save*.
+4. **Aspetta 1–2 minuti.** In cima alla stessa pagina comparirà "Your site is live at …". Apri quell'indirizzo dal computer per controllare che l'app si veda.
+
+## In alternativa: Netlify (anche con repository privato)
+
+1. Scarica il repository come ZIP (*Code* → *Download ZIP*) e scompattalo.
+2. Vai su **https://app.netlify.com/drop**, crea un account gratuito e trascina nella pagina la cartella scompattata.
+3. Netlify ti dà un indirizzo tipo `https://nome-a-caso.netlify.app`. Puoi cambiarlo in *Site configuration* → *Change site name*.
+4. Per gli aggiornamenti successivi: *Deploys* → trascina di nuovo la cartella aggiornata.
+   In alternativa, *Add new site* → *Import an existing project* → GitHub collega il repository, e Netlify pubblica da solo ogni modifica su `main`.
+
+(Vercel funziona allo stesso modo: *Add New* → *Project* → importa il repository, preset "Other", nessun comando di build.)
+
+## Installazione sull'iPhone
+
+1. Apri l'indirizzo dell'app con **Safari**. Da Chrome o da altre app non si può aggiungere alla Home come app.
+2. Tocca il pulsante **Condividi** (il quadrato con la freccia verso l'alto).
+3. Scorri e scegli **Aggiungi alla schermata Home** → *Aggiungi*.
+4. Apri l'app **dall'icona "Palestra"** sulla Home: si apre a schermo intero.
+5. Al primo avvio con la connessione attiva l'app salva i suoi file sul telefono. Da quel momento funziona anche offline.
+
+> I dati salvati dall'icona sulla Home e quelli salvati da Safari sono **separati**. Usa sempre l'icona.
+
+## Backup: importante
+
+iOS può cancellare i dati dei siti e delle app web che non usi per un po' di tempo. Per non perdere lo storico:
+
+- **Storico** → **Esporta dati** → nel foglio di condivisione scegli **Salva in File** (per esempio in iCloud Drive). Viene creato un file `diario-palestra-AAAA-MM-GG.json`.
+- Per recuperare i dati, anche su un altro telefono: **Storico** → **Importa backup** → scegli il file. L'importazione **unisce** i dati: un allenamento o una scheda con lo stesso identificativo viene sostituito, e il resto si aggiunge.
+- L'app mostra la data dell'ultimo backup e la evidenzia se sono passati più di 14 giorni.
+
+## Pubblicare una modifica
+
+1. Modifica i file.
+2. **In `sw.js` aumenta `VERSION`** (es. da `'v1'` a `'v2'`). Altrimenti il telefono continua a usare i file vecchi salvati in cache.
+3. Pubblica (merge su `main` con GitHub Pages, oppure trascina di nuovo la cartella su Netlify).
+4. Alla successiva apertura l'app mostra "Nuova versione disponibile": tocca **Aggiorna**. L'allenamento in corso non si perde.
+
+## Prova sul computer
+
+```sh
+python3 -m http.server 8000
+# poi apri http://localhost:8000
+```
+
+Il service worker funziona solo su `https://` oppure su `localhost`. Aprire direttamente `index.html` dal disco non basta.
+
+## Regole di calcolo
+
+- **1RM stimato** (formula di Epley): `kg × (1 + ripetizioni / 30)`. Con 1 ripetizione vale `kg`.
+- **Volume**: somma di `kg × ripetizioni`.
+- **Nuovo record**: c'è solo se il peso massimo supera il massimo precedente dello stesso esercizio. La prima volta che fai un esercizio non conta come record.
+- Gli esercizi si confrontano per nome, senza distinguere maiuscole e minuscole e ignorando gli spazi all'inizio e alla fine.
+- Quando termini l'allenamento vengono salvate solo le serie segnate come fatte, con kg ≥ 0 e almeno 1 ripetizione.
+
+## Prossimi passi
+
+1. Timer di recupero tra le serie.
+2. Peso corporeo nel tempo.
+3. Garmin: verificare cosa è davvero accessibile (Garmin Connect, Apple Salute, esportazione file). Un'app web non può leggere i dati Garmin o Salute direttamente. Solo se serve un accesso diretto si valuta un'app iPhone nativa (serve un Mac con Xcode).
