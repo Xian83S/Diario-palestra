@@ -49,6 +49,24 @@ Il codice è già su GitHub, quindi questa è la strada più breve. L'indirizzo 
 
 > I dati salvati dall'icona sulla Home e quelli salvati da Safari sono **separati**. Usa sempre l'icona.
 
+## Ripeti ultimo allenamento
+
+- In **Oggi** ogni scheda ha due pulsanti:
+  - **Inizia** parte con i valori previsti dalla scheda.
+  - **Ripeti ultimo** copia esercizi e serie dell'ultima sessione registrata con quella scheda, con i kg e le ripetizioni effettivamente fatti.
+- **Allenamento libero** ha **Ripeti ultimo allenamento**, che copia l'ultima sessione in assoluto, di qualsiasi scheda.
+- Tutte le serie partono non segnate. La data è quella di oggi e l'id è nuovo: la sessione di origine non viene toccata.
+- Recupero e timer degli esercizi vengono dalla scheda.
+- Dopo l'avvio si modifica tutto come in un allenamento normale.
+- Se una scheda non ha ancora sessioni, il pulsante è disattivato con scritto "Nessun allenamento precedente".
+
+## Pulsanti − e + dei kg
+
+- Ogni serie ha i pulsanti **−** e **+** per i kg. Il campo resta modificabile a mano e il valore non scende sotto 0.
+- Il passo si sceglie in **Storico → Impostazioni → Passo peso (kg)**: 1, 2,5 o 5 (predefinito 2,5).
+- Fino a 429 px di larghezza (la maggior parte degli iPhone) i pulsanti stanno **sotto** il campo kg; sugli schermi più larghi stanno **accanto**. Restano sempre di almeno 44×44 px.
+- I kg si possono scrivere con la virgola o con il punto. Vengono mostrati senza zeri inutili: 60 e non 60,0; 62,5 se serve.
+
 ## Timer di recupero
 
 - In **Schede** ogni esercizio ha il suo tempo di recupero, regolabile da 0:15 a 10:00 a passi di 15 secondi (predefinito 1:30).
@@ -94,6 +112,7 @@ Il formato dei dati ha un numero di versione (`Model.DATA_VERSION` in `model.js`
 - **Versione 1:** ogni esercizio di una scheda aveva `sets`, `reps` e `weight` unici (es. 4 serie da 8 a 60 kg).
 - **Versione 2:** ogni serie ha le proprie ripetizioni e il proprio peso: `sets: [{reps: 10, weight: 55}, {reps: 8, weight: 60}, …]`, più il recupero `rest` in secondi.
 - **Versione 3:** ogni esercizio ha anche `timer: {enabled, seconds}` per gli esercizi a tempo. Per le schede esistenti vale `{enabled: false, seconds: 30}`.
+- **Versione 5:** impostazioni `settings: {weightStep}`, cioè il passo dei pulsanti − e + dei kg (1, 2,5 o 5; predefinito 2,5). Sono incluse nei backup.
 - **Versione 4:** nuova raccolta `bodyWeights` per il peso corporeo, `[{id, date, kg, createdAt}]`, con al massimo una registrazione per data. Viene inclusa nei backup.
 
 All'apertura l'app converte da sola le schede vecchie: 4×8 a 60 kg diventa 4 serie identiche da 8 a 60 kg. Prima di ogni conversione salva una copia delle schede com'erano (`diarioPalestra.plans.v1`, `diarioPalestra.plans.v2`, …). Le sessioni già registrate non vengono toccate. Anche i backup vecchi, compresi quelli senza numero di versione, vengono convertiti all'importazione. Un backup creato da una versione più recente dell'app viene rifiutato.
