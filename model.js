@@ -13,11 +13,16 @@
  *       al massimo una registrazione per data. Le schede non cambiano.
  *   5 — nuove impostazioni `settings: {weightStep}`: passo dei pulsanti −/+ dei kg
  *       (1, 2,5 o 5; predefinito 2,5).
+ *   6 — identificativo stabile degli esercizi: ogni esercizio di schede, sessioni
+ *       e bozza ha `exerciseId` (id della libreria data/esercizi.json oppure
+ *       "custom-…") più `name`, copia del nome al momento. Nuova raccolta
+ *       `customExercises` per gli esercizi personalizzati. La migrazione
+ *       (linkExercises) aggiunge solo gli id: nomi, serie e date restano uguali.
  * Tutti i campi mancanti vengono completati con i valori predefiniti.
  * Le sessioni registrate non cambiano tra le versioni.
  */
 const Model = (() => {
-  const DATA_VERSION = 5;
+  const DATA_VERSION = 6;
   const DEFAULT_REPS = 10;
   const DEFAULT_SETS = 3;
   const REST = { default: 90, min: 15, max: 600, step: 15 }; // secondi
@@ -25,6 +30,17 @@ const Model = (() => {
   const BODY_WEIGHT = { min: 20, max: 400 };                  // kg accettati
   const WEIGHT_STEPS = [1, 2.5, 5];                           // passo dei pulsanti −/+ (kg)
   const DEFAULT_SETTINGS = { weightStep: 2.5 };
+  const BODY_PARTS = ['Petto', 'Schiena', 'Spalle', 'Bicipiti', 'Tricipiti', 'Quadricipiti',
+    'Femorali', 'Glutei', 'Polpacci', 'Core', 'Corpo intero/Cardio'];
+  const EQUIPMENT = ['bilanciere', 'manubri', 'macchina', 'cavi', 'corpo libero', 'kettlebell', 'elastici', 'altro'];
+
+  /** Chiave usata fino alla versione 5 per riconoscere lo stesso esercizio (maiuscole e spazi ai bordi). */
+  const norm = s => String(s ?? '').trim().toLowerCase();
+  /** Chiave di ricerca: senza maiuscole, spazi, accenti e punteggiatura ("Pull-down" = "pulldown"). */
+  const fold = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const slug = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'esercizio';
+  const isCustomId = id => String(id ?? '').startsWith('custom-');
 
   const num = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
   const cleanReps = v => { const n = Math.round(num(v)); return n >= 1 ? n : DEFAULT_REPS; };
@@ -59,7 +75,11 @@ const Model = (() => {
       sets = Array.from({ length: count }, () => ({ ...set }));
     }
     if (!sets.length) sets = [{ reps: DEFAULT_REPS, weight: 0 }];
-    return { id: String(ex.id || newId()), name: String(ex.name).trim(), sets, rest: cleanRest(ex.rest), timer: cleanTimer(ex.timer) };
+    return {
+      id: String(ex.id || newId()),
+      ...(ex.exerciseId ? { exerciseId: String(ex.exerciseId) } : {}),
+      name: String(ex.name).trim(), sets, rest: cleanRest(ex.rest), timer: cleanTimer(ex.timer),
+    };
   }
 
   /** Porta una scheda al formato attuale. Restituisce null se non valida. */
@@ -106,8 +126,119 @@ const Model = (() => {
     return { weightStep: WEIGHT_STEPS.includes(step) ? step : DEFAULT_SETTINGS.weightStep };
   }
 
+  const cleanList = v => (Array.isArray(v) ? v : String(v ?? '').split(','))
+    .map(x => String(x ?? '').trim()).filter(Boolean).slice(0, 20);
+
+  /**
+   * Id di un nuovo esercizio personalizzato, ricavato dal nome ("custom-panca-convergente"):
+   * lo stesso nome dà lo stesso id su ogni dispositivo, così importare un backup non crea
+   * doppioni. Se l'id è già usato si aggiunge -2, -3, …
+   */
+  function customIdFor(name, taken = new Set()) {
+    const base = `custom-${slug(name)}`;
+    let id = base;
+    for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+    return id;
+  }
+
+  /** Esercizio personalizzato, o null se senza nome. L'id ha sempre il prefisso "custom-". */
+  function cleanCustomExercise(c, taken) {
+    if (!c || typeof c !== 'object' || !String(c.name ?? '').trim()) return null;
+    const name = String(c.name).trim().slice(0, 80);
+    return {
+      id: isCustomId(c.id) ? String(c.id) : customIdFor(name, taken),
+      name,
+      aliases: cleanList(c.aliases),
+      bodyPart: BODY_PARTS.includes(c.bodyPart) ? c.bodyPart : '',
+      muscles: cleanList(c.muscles),
+      secondary: cleanList(c.secondary),
+      equipment: EQUIPMENT.includes(c.equipment) ? c.equipment : 'altro',
+      instructions: String(c.instructions ?? '').trim().slice(0, 1000),
+      timed: c.timed === true,
+      createdAt: c.createdAt ? String(c.createdAt) : new Date().toISOString(),
+    };
+  }
+
+  function cleanCustomExercises(list) {
+    const seen = new Set();
+    return (Array.isArray(list) ? list : []).map(cleanCustomExercise)
+      .filter(c => c && !seen.has(c.id) && seen.add(c.id));
+  }
+
+  /**
+   * Collega a un exerciseId ogni esercizio che non ce l'ha ancora (schede, sessioni, bozza).
+   * - Lo stesso nome (come raggruppato fino alla v5: maiuscole e spazi ai bordi) riceve sempre lo
+   *   stesso id, così storico, record e grafici restano identici.
+   * - Il nome si cerca nella libreria senza maiuscole, spazi e accenti, anche negli alias,
+   *   poi tra gli esercizi personalizzati.
+   * - Due nomi che prima erano esercizi DIVERSI restano diversi: se puntano allo stesso esercizio
+   *   di libreria, lo prende il nome più usato e l'altro diventa un esercizio personalizzato.
+   * - Senza corrispondenza si crea un esercizio personalizzato con lo stesso nome.
+   * Senza libreria non fa nulla (si riproverà al prossimo avvio).
+   */
+  function linkExercises({ plans = [], sessions = [], draft = null, customExercises = [] }, library) {
+    const lib = library && Array.isArray(library.exercises) ? library.exercises : null;
+    const items = [];
+    plans.forEach(p => p.exercises.forEach(ex => items.push(ex)));
+    sessions.forEach(s => (s.exercises || []).forEach(ex => items.push(ex)));
+    if (draft && Array.isArray(draft.exercises)) draft.exercises.forEach(ex => items.push(ex));
+    const missing = items.filter(ex => ex && !ex.exerciseId && String(ex.name ?? '').trim());
+    const result = { plans, sessions, draft, customExercises, linked: [], created: [] };
+    if (!lib || !missing.length) return result;
+
+    const byName = new Map();   // norm(nome) -> exerciseId
+    const owner = new Map();    // exerciseId -> norm(nome) che lo usa
+    for (const ex of items) if (ex && ex.exerciseId) {
+      const k = norm(ex.name);
+      if (!byName.has(k)) byName.set(k, ex.exerciseId);
+      if (!owner.has(ex.exerciseId)) owner.set(ex.exerciseId, k);
+    }
+    const libIndex = new Map();
+    for (const e of lib) for (const label of [e.name, ...(e.aliases || [])]) {
+      const f = fold(label);
+      if (f && !libIndex.has(f)) libIndex.set(f, e.id);
+    }
+    const customs = customExercises.slice();
+    const customIndex = new Map(customs.map(c => [fold(c.name), c.id]));
+    const free = (id, k) => id && (!owner.has(id) || owner.get(id) === k);
+
+    // I nomi più usati scelgono per primi.
+    const count = new Map(), display = new Map();
+    for (const ex of missing) {
+      const k = norm(ex.name);
+      count.set(k, (count.get(k) || 0) + 1);
+      if (!display.has(k)) display.set(k, String(ex.name).trim());
+    }
+    const order = [...count.keys()].sort((a, b) => count.get(b) - count.get(a) || a.localeCompare(b));
+    for (const k of order) {
+      if (byName.has(k)) continue;
+      const f = fold(k);
+      let id = free(libIndex.get(f), k) ? libIndex.get(f) : null;
+      if (id) result.linked.push({ name: display.get(k), exerciseId: id });
+      if (!id && free(customIndex.get(f), k)) id = customIndex.get(f);
+      if (!id) {
+        const c = cleanCustomExercise({ name: display.get(k) }, new Set(customs.map(x => x.id)));
+        customs.push(c);
+        customIndex.set(f, c.id);
+        id = c.id;
+        result.created.push({ name: c.name, exerciseId: id });
+      }
+      byName.set(k, id);
+      owner.set(id, k);
+    }
+    const withId = ex => (!ex || ex.exerciseId || !String(ex.name ?? '').trim()) ? ex : { ...ex, exerciseId: byName.get(norm(ex.name)) };
+    return {
+      ...result,
+      plans: plans.map(p => ({ ...p, exercises: p.exercises.map(withId) })),
+      sessions: sessions.map(s => ({ ...s, exercises: (s.exercises || []).map(withId) })),
+      draft: draft && Array.isArray(draft.exercises) ? { ...draft, exercises: draft.exercises.map(withId) } : draft,
+      customExercises: customs,
+    };
+  }
+
   return {
     DATA_VERSION, REST, TIMER, BODY_WEIGHT, WEIGHT_STEPS, DEFAULT_SETTINGS, cleanSettings,
+    BODY_PARTS, EQUIPMENT, norm, fold, isCustomId, cleanCustomExercise, cleanCustomExercises, linkExercises,
     cleanRest, cleanTimer, migratePlan, migratePlans, migratePlanExercise,
     validBodyKg, cleanBodyWeight, cleanBodyWeights,
   };
