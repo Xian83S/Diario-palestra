@@ -175,12 +175,15 @@ input[type="date"]::-webkit-date-and-time-value { text-align: left; }
 
 .sets { display: flex; flex-direction: column; gap: 6px; }
 .set-row {
-  display: grid; grid-template-columns: 2rem minmax(0, 1fr) minmax(0, 1fr) 48px;
-  gap: 8px; align-items: center; border-radius: 10px; padding: 2px 4px;
+  /* # | kg con − e + | rip. | fatta. Fino a 429 px i pulsanti −/+ stanno SOTTO il campo kg (vedi .kg-cell) */
+  display: grid; grid-template-columns: 2rem minmax(96px, 1.35fr) minmax(0, 1fr) 48px;
+  gap: 8px; align-items: start; border-radius: 10px; padding: 4px;
 }
 .set-row.head { font-size: 0.8rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 0; }
 .set-row.head span:last-child { text-align: center; }
-.set-row .set-n { font-family: var(--font-display); font-weight: 600; font-size: 1.2rem; text-align: center; color: var(--muted); }
+.set-row .set-n { font-family: var(--font-display); font-weight: 600; font-size: 1.2rem; text-align: center; color: var(--muted); line-height: 44px; }
+.set-row.head { align-items: end; }
+.set-row.head span { line-height: 1.2; }
 .set-row input { text-align: center; font-family: var(--font-display); font-size: 1.25rem; font-weight: 600; padding: 6px 4px; }
 .set-row.done { background: var(--done-bg); }
 .set-row.done input { border-color: transparent; background: transparent; }
@@ -411,3 +414,42 @@ input.switch:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-s
 .bw-item { align-items: center; }
 .bw-item .main { flex: 1; }
 .bw-item .icon-btn { margin-left: 4px; }
+
+/* ---------- Pulsanti − / + dei kg ---------- */
+.kg-cell {
+  display: grid; gap: 8px; min-width: 0;
+  grid-template-columns: minmax(44px, 1fr) minmax(44px, 1fr);
+  grid-template-areas: "in in" "minus plus";
+}
+.kg-cell input { grid-area: in; }
+.kg-cell .step-minus { grid-area: minus; }
+.kg-cell .step-plus { grid-area: plus; }
+.step-btn {
+  min-width: 44px; height: 44px; padding: 0; border-radius: 10px; cursor: pointer; touch-action: manipulation;
+  border: 1px solid var(--border); background: var(--surface); color: var(--accent);
+  font-family: var(--font-display); font-size: 1.6rem; font-weight: 600; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.step-btn:active { background: var(--accent-soft); }
+.set-row.done .step-btn { background: transparent; }
+/* Schermi larghi: − e + accanto al campo kg, sulla stessa riga */
+@media (min-width: 430px) {
+  .set-row { grid-template-columns: 2rem minmax(0, 1.6fr) minmax(0, 1fr) 48px; }
+  .kg-cell { grid-template-columns: 44px minmax(56px, 1fr) 44px; grid-template-areas: "minus in plus"; }
+}
+
+/* ---------- Oggi: Inizia / Ripeti ultimo ---------- */
+.pick-card { display: flex; flex-direction: column; gap: 10px; }
+.pick-card.free { background: var(--surface-2); }
+.pick-head strong { display: block; font-family: var(--font-display); font-size: 1.35rem; font-weight: 600; line-height: 1.15; }
+.pick-head .meta { color: var(--muted); font-size: 0.9rem; }
+.pick-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pick-actions .btn { min-height: 56px; flex-direction: column; justify-content: center; gap: 1px; padding: 6px 10px; text-align: center; line-height: 1.15; }
+.pick-actions .btn small { font-weight: 500; font-size: 0.78rem; opacity: 0.8; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn:disabled:active { transform: none; }
+
+/* ---------- Impostazioni ---------- */
+.setting-row { display: flex; flex-direction: column; gap: 10px; }
+.setting-row p { font-size: 0.9rem; margin-top: 2px; }
+.setting-row .segmented button { min-height: 44px; font-family: var(--font-display); font-size: 1.15rem; }

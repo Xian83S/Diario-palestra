@@ -16,7 +16,8 @@ const dateStr = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDat
 const todayStr = () => dateStr(new Date());
 const daysAgoStr = n => { const d = new Date(); d.setDate(d.getDate() - n); return dateStr(d); };
 const fmt = (n, dec = 1) => Number.isFinite(n) ? n.toLocaleString('it-IT', { maximumFractionDigits: dec }) : '–';
-const fmtKgInput = n => Number.isFinite(n) && n > 0 ? String(n).replace('.', ',') : (n === 0 ? '0' : '');
+/** kg per i campi di testo: virgola italiana, niente zeri inutili (60, 62,5), arrotondati a 0,01. */
+const fmtKgInput = n => Number.isFinite(n) && n >= 0 ? String(Math.round(n * 100) / 100).replace('.', ',') : '';
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const timeOf = v => new Date(v || 0).getTime() || 0;
 
@@ -63,6 +64,7 @@ const state = {
   bodyWeights: [],   // peso corporeo, in ordine di data
   bodyForm: { date: '', kg: '' },
   bodyShowAll: false,
+  settings: { ...Model.DEFAULT_SETTINGS },
   openSessions: new Set(),
   confirm: null,     // chiave del pulsante "armato" (eliminazione a due passaggi)
   lastBackup: null,
@@ -179,11 +181,19 @@ function renderOggi() {
   if (state.draft) return renderDraft();
 
   const last = sortedSessions()[0];
+  const repeatBtn = (planId, src, label) => src
+    ? `<button type="button" class="btn soft" data-action="repeat" data-plan="${esc(planId)}">
+        <span>${label}</span><small>${esc(planId ? fmtDateRel(src.date) : `${src.planName}, ${fmtDateRel(src.date)}`)}</small></button>`
+    : `<button type="button" class="btn soft" disabled>
+        <span>${label}</span><small>Nessun allenamento precedente</small></button>`;
   const plans = state.plans.map(p => `
-    <button type="button" class="btn" data-action="start" data-plan="${esc(p.id)}">
-      <span><strong>${esc(p.name)}</strong><br><span class="meta">${plural(p.exercises.length, 'esercizio', 'esercizi')}</span></span>
-      <span class="meta">Inizia →</span>
-    </button>`).join('');
+    <article class="card pick-card">
+      <div class="pick-head"><strong>${esc(p.name)}</strong><span class="meta">${plural(p.exercises.length, 'esercizio', 'esercizi')}</span></div>
+      <div class="pick-actions">
+        <button type="button" class="btn primary" data-action="start" data-plan="${esc(p.id)}"><span>Inizia</span><small>valori della scheda</small></button>
+        ${repeatBtn(p.id, lastSessionOfPlan(p.id), 'Ripeti ultimo')}
+      </div>
+    </article>`).join('');
 
   return `
     <header class="view-head">
@@ -196,10 +206,13 @@ function renderOggi() {
     <h2 class="section-title">Scegli la scheda</h2>
     <div class="plan-pick">
       ${plans}
-      <button type="button" class="btn ${state.plans.length ? 'soft' : 'primary'}" data-action="start" data-plan="">
-        <span><strong>Allenamento libero</strong><br><span class="meta">Aggiungi gli esercizi mentre ti alleni</span></span>
-        <span class="meta">Inizia →</span>
-      </button>
+      <article class="card pick-card free">
+        <div class="pick-head"><strong>Allenamento libero</strong><span class="meta">Aggiungi gli esercizi mentre ti alleni</span></div>
+        <div class="pick-actions">
+          <button type="button" class="btn ${state.plans.length ? '' : 'primary'}" data-action="start" data-plan=""><span>Inizia</span><small>vuoto</small></button>
+          ${repeatBtn('', last, 'Ripeti ultimo allenamento')}
+        </div>
+      </article>
     </div>
     ${state.plans.length ? '' : `
       <div class="card empty">
@@ -220,7 +233,11 @@ function renderDraft() {
     const rows = ex.sets.map((s, j) => `
       <div class="set-row ${s.done ? 'done' : ''}" data-i="${i}" data-j="${j}">
         <span class="set-n">${j + 1}</span>
-        <input type="text" inputmode="decimal" autocomplete="off" enterkeyhint="next" aria-label="Serie ${j + 1}, kg" data-field="kg" value="${esc(s.kg)}" placeholder="kg">
+        <div class="kg-cell">
+          <button type="button" class="step-btn step-minus" data-action="kg-step" data-dir="-1" aria-label="Serie ${j + 1}: togli ${fmt(state.settings.weightStep, 2)} kg">−</button>
+          <input type="text" inputmode="decimal" autocomplete="off" enterkeyhint="next" aria-label="Serie ${j + 1}, kg" data-field="kg" value="${esc(s.kg)}" placeholder="kg">
+          <button type="button" class="step-btn step-plus" data-action="kg-step" data-dir="1" aria-label="Serie ${j + 1}: aggiungi ${fmt(state.settings.weightStep, 2)} kg">+</button>
+        </div>
         <input type="text" inputmode="numeric" autocomplete="off" enterkeyhint="done" aria-label="Serie ${j + 1}, ripetizioni" data-field="reps" value="${esc(s.reps)}" placeholder="rip">
         <button type="button" class="check" data-action="set-toggle" aria-pressed="${s.done}" aria-label="Serie ${j + 1} fatta">${ICON.check}</button>
         ${exTimerOn(ex) ? (timerFor(i, j)
@@ -305,27 +322,70 @@ function planSetsToDraft(sets) {
   return sets.map(s => ({ kg: fmtKgInput(s.weight), reps: s.reps ? String(s.reps) : '', done: false }));
 }
 
-function startWorkout(planId) {
-  if (state.draft) return toast('C\'è già un allenamento in corso.');
-  const plan = state.plans.find(p => p.id === planId);
+/** Crea l'allenamento in corso: id nuovo, data di oggi, nessuna serie fatta. */
+function beginDraft({ planId, planName, exercises }) {
   state.draft = {
     id: uid(),
     date: todayStr(),
-    planId: plan ? plan.id : null,
-    planName: plan ? plan.name : 'Allenamento libero',
+    planId,
+    planName,
     createdAt: new Date().toISOString(),
-    exercises: plan ? plan.exercises.map(ex => ({
-      name: ex.name,
-      rest: restOf(ex),
-      timer: Model.cleanTimer(ex.timer),
-      sets: planSetsToDraft(ex.sets),
-    })) : [],
+    exercises,
     timer: null,
   };
   state.summary = null;
   saveDraft();
   showView('oggi');
   window.scrollTo(0, 0);
+}
+
+function startWorkout(planId) {
+  if (state.draft) return toast('C\'è già un allenamento in corso.');
+  const plan = state.plans.find(p => p.id === planId);
+  beginDraft({
+    planId: plan ? plan.id : null,
+    planName: plan ? plan.name : 'Allenamento libero',
+    exercises: plan ? plan.exercises.map(ex => ({
+      name: ex.name,
+      rest: restOf(ex),
+      timer: Model.cleanTimer(ex.timer),
+      sets: planSetsToDraft(ex.sets),
+    })) : [],
+  });
+}
+
+/** Ultima sessione registrata con una scheda (per data, poi per ora di salvataggio). */
+function lastSessionOfPlan(planId) {
+  return sortedSessions().find(s => s.planId === planId && s.exercises.length) || null;
+}
+
+/**
+ * "Ripeti ultimo": copia esercizi e serie (kg e ripetizioni effettivamente fatti)
+ * dell'ultima sessione della scheda, oppure dell'ultima in assoluto se planId è vuoto.
+ * Id e data NON vengono copiati: l'allenamento nuovo è di oggi. Recupero e timer
+ * vengono dalla scheda, perché le sessioni registrate non li contengono.
+ */
+function repeatWorkout(planId) {
+  if (state.draft) return toast('C\'è già un allenamento in corso.');
+  const src = planId ? lastSessionOfPlan(planId) : sortedSessions()[0];
+  if (!src) return toast('Nessun allenamento precedente.');
+  const plan = state.plans.find(p => p.id === (planId || src.planId)) || null;
+  const planExercise = name => (plan && plan.exercises.find(e => norm(e.name) === norm(name)))
+    || state.plans.flatMap(p => p.exercises).find(e => norm(e.name) === norm(name)) || null;
+  beginDraft({
+    planId: plan ? plan.id : null,
+    planName: plan ? plan.name : src.planName,
+    exercises: src.exercises.filter(ex => ex.sets.length).map(ex => {
+      const pe = planExercise(ex.name);
+      return {
+        name: ex.name,
+        rest: restOf(pe),
+        timer: Model.cleanTimer(pe && pe.timer),
+        sets: ex.sets.map(set => ({ kg: fmtKgInput(set.kg), reps: String(set.reps), done: false })),
+      };
+    }),
+  });
+  toast(`Ripeti: ${src.planName} di ${fmtDateRel(src.date)}.`);
 }
 
 function addDraftExercise(name) {
@@ -1000,6 +1060,16 @@ function renderStorico() {
   return `
     <header class="view-head"><h1>Storico</h1><span class="sub">${plural(state.sessions.length, 'allenamento', 'allenamenti')}</span></header>
     ${list || '<div class="card empty"><h2>Nessun allenamento</h2><p>Gli allenamenti terminati compariranno qui.</p></div>'}
+    <h2 class="section-title">Impostazioni</h2>
+    <article class="card settings">
+      <div class="setting-row">
+        <div><strong>Passo peso (kg)</strong>
+          <p class="muted">Quanto cambiano i kg con i pulsanti − e + durante l'allenamento.</p></div>
+        <div class="segmented" role="group" aria-label="Passo peso (kg)">
+          ${Model.WEIGHT_STEPS.map(v => `<button type="button" data-action="weight-step" data-step="${v}" aria-pressed="${v === state.settings.weightStep}">${fmt(v, 2)}</button>`).join('')}
+        </div>
+      </div>
+    </article>
     <h2 class="section-title">Backup</h2>
     <article class="card backup">
       <p>Safari può cancellare i dati delle app poco usate: esporta ogni tanto un file di backup (in File di iCloud, per esempio). ${backupMsg}</p>
@@ -1019,6 +1089,7 @@ async function exportData() {
     plans: state.plans,
     sessions: state.sessions,
     bodyWeights: state.bodyWeights,
+    settings: state.settings,
   };
   const name = `diario-palestra-${todayStr()}.json`;
   const json = JSON.stringify(data, null, 2);
@@ -1088,8 +1159,12 @@ async function importFile(file) {
   const weights = new Map(state.bodyWeights.map(w => [w.date, w]));
   weightsIn.forEach(w => weights.set(w.date, w));
 
-  const next = { plans: [...plans.values()], sessions: [...sessions.values()], bodyWeights: Model.cleanBodyWeights([...weights.values()]) };
+  // Impostazioni: quelle del backup, se presenti (fino alla versione 4 non c'erano)
+  const settings = data.settings && typeof data.settings === 'object' ? Model.cleanSettings(data.settings) : state.settings;
+
+  const next = { plans: [...plans.values()], sessions: [...sessions.values()], bodyWeights: Model.cleanBodyWeights([...weights.values()]), settings };
   await Store.replaceAll(next);
+  state.settings = next.settings;
   state.plans = next.plans;
   state.sessions = next.sessions;
   state.bodyWeights = next.bodyWeights;
@@ -1125,6 +1200,22 @@ function showView(view) {
 const ACTIONS = {
   'tab': el => showView(el.dataset.view),
   'start': el => startWorkout(el.dataset.plan),
+  'repeat': el => repeatWorkout(el.dataset.plan),
+  'kg-step': el => {
+    const row = el.closest('.set-row');
+    const set = state.draft.exercises[+row.dataset.i].sets[+row.dataset.j];
+    const cur = toNum(set.kg);
+    const base = Number.isFinite(cur) && cur > 0 ? cur : 0;
+    set.kg = fmtKgInput(Math.max(0, base + Number(el.dataset.dir) * state.settings.weightStep));
+    row.querySelector('[data-field="kg"]').value = set.kg;
+    saveDraft();
+  },
+  'weight-step': async el => {
+    state.settings = Model.cleanSettings({ ...state.settings, weightStep: Number(el.dataset.step) });
+    await Store.saveSettings(state.settings);
+    toast(`Passo peso: ${fmt(state.settings.weightStep, 2)} kg.`);
+    render();
+  },
 
   'set-toggle': el => {
     const row = el.closest('.set-row');
@@ -1300,6 +1391,16 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.dataset.field === 'progress-ex') { state.progress.exercise = t.value; render(); return; }
+  if (t.dataset.field === 'kg' && state.draft) {
+    const row = t.closest('.set-row');
+    const n = toNum(t.value);
+    if (row && Number.isFinite(n) && n >= 0) {
+      t.value = fmtKgInput(n);
+      state.draft.exercises[+row.dataset.i].sets[+row.dataset.j].kg = t.value;
+      saveDraft();
+    }
+    return;
+  }
   if (t.dataset.bfield === 'date') { state.bodyForm.date = t.value; render(); return; } // aggiorna "Salva/Aggiorna" 
   if (t.id === 'import-file' && t.files && t.files[0]) {
     const file = t.files[0];
@@ -1392,6 +1493,7 @@ async function registerServiceWorker() {
     state.plans = data.plans;
     state.sessions = data.sessions;
     state.bodyWeights = data.bodyWeights || [];
+    state.settings = data.settings || { ...Model.DEFAULT_SETTINGS };
     state.draft = data.draft && Array.isArray(data.draft.exercises) ? data.draft : null;
     state.lastBackup = await Store.getLastBackup();
   } catch (err) {

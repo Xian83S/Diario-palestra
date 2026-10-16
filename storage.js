@@ -6,14 +6,15 @@
  * esterno (API, database remoto…) senza toccare app.js.
  *
  * Interfaccia:
- *   load()               -> { plans, sessions, draft, bodyWeights }  (migra i dati vecchi, vedi model.js)
+ *   load()               -> { plans, sessions, draft, bodyWeights, settings }  (migra i dati vecchi, vedi model.js)
  *   savePlans(plans)
  *   saveSession(session)  (inserisce o aggiorna per id)
  *   deleteSession(id)
  *   saveDraft(draft|null) (allenamento in corso; null = elimina)
  *   saveBodyWeight(entry) (peso corporeo; sostituisce quello della stessa data)
  *   deleteBodyWeight(id)
- *   replaceAll({plans, sessions, bodyWeights})  (usato dall'importazione backup)
+ *   saveSettings(settings) (es. passo dei pulsanti −/+ dei kg)
+ *   replaceAll({plans, sessions, bodyWeights, settings})  (usato dall'importazione backup)
  *   getLastBackup() / markBackup()
  *   requestPersistence()
  */
@@ -23,6 +24,7 @@ const Store = (() => {
     sessions: 'diarioPalestra.sessions',
     draft: 'diarioPalestra.draft',
     bodyWeights: 'diarioPalestra.bodyWeights',
+    settings: 'diarioPalestra.settings',
     lastBackup: 'diarioPalestra.lastBackup',
     dataVersion: 'diarioPalestra.dataVersion',
     // Copia di sicurezza prima di ogni migrazione: diarioPalestra.plans.v1, .v2, …
@@ -72,6 +74,7 @@ const Store = (() => {
         sessions: Array.isArray(sessions) ? sessions : [],
         draft: read(KEYS.draft, null),
         bodyWeights: Model.cleanBodyWeights(read(KEYS.bodyWeights, [])),
+        settings: Model.cleanSettings(read(KEYS.settings, null)),
       };
     },
 
@@ -104,10 +107,15 @@ const Store = (() => {
       write(KEYS.bodyWeights, read(KEYS.bodyWeights, []).filter(w => w && w.id !== id));
     },
 
-    async replaceAll({ plans, sessions, bodyWeights }) {
+    async saveSettings(settings) {
+      write(KEYS.settings, settings);
+    },
+
+    async replaceAll({ plans, sessions, bodyWeights, settings }) {
       write(KEYS.plans, plans);
       write(KEYS.sessions, sessions);
       if (bodyWeights) write(KEYS.bodyWeights, bodyWeights);
+      if (settings) write(KEYS.settings, settings);
     },
 
     async getLastBackup() {

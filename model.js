@@ -11,16 +11,20 @@
  *       (plank, isometrie). Predefinito: {enabled: false, seconds: 30}.
  *   4 — nuova raccolta `bodyWeights`: [{id, date: "YYYY-MM-DD", kg, createdAt}],
  *       al massimo una registrazione per data. Le schede non cambiano.
+ *   5 — nuove impostazioni `settings: {weightStep}`: passo dei pulsanti −/+ dei kg
+ *       (1, 2,5 o 5; predefinito 2,5).
  * Tutti i campi mancanti vengono completati con i valori predefiniti.
  * Le sessioni registrate non cambiano tra le versioni.
  */
 const Model = (() => {
-  const DATA_VERSION = 4;
+  const DATA_VERSION = 5;
   const DEFAULT_REPS = 10;
   const DEFAULT_SETS = 3;
   const REST = { default: 90, min: 15, max: 600, step: 15 }; // secondi
   const TIMER = { seconds: 30, max: 3600 };                   // secondi
   const BODY_WEIGHT = { min: 20, max: 400 };                  // kg accettati
+  const WEIGHT_STEPS = [1, 2.5, 5];                           // passo dei pulsanti −/+ (kg)
+  const DEFAULT_SETTINGS = { weightStep: 2.5 };
 
   const num = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : NaN; };
   const cleanReps = v => { const n = Math.round(num(v)); return n >= 1 ? n : DEFAULT_REPS; };
@@ -95,8 +99,15 @@ const Model = (() => {
     return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
   }
 
+  /** Impostazioni: valori non ammessi tornano al predefinito. */
+  function cleanSettings(s) {
+    const obj = s && typeof s === 'object' ? s : {};
+    const step = num(obj.weightStep);
+    return { weightStep: WEIGHT_STEPS.includes(step) ? step : DEFAULT_SETTINGS.weightStep };
+  }
+
   return {
-    DATA_VERSION, REST, TIMER, BODY_WEIGHT,
+    DATA_VERSION, REST, TIMER, BODY_WEIGHT, WEIGHT_STEPS, DEFAULT_SETTINGS, cleanSettings,
     cleanRest, cleanTimer, migratePlan, migratePlans, migratePlanExercise,
     validBodyKg, cleanBodyWeight, cleanBodyWeights,
   };
