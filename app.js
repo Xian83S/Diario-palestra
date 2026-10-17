@@ -65,6 +65,9 @@ const state = {
   bodyForm: { date: '', kg: '' },
   bodyShowAll: false,
   settings: { ...Model.DEFAULT_SETTINGS },
+  library: null,          // libreria esercizi (data/esercizi.json) con indice per id
+  customExercises: [],    // esercizi personalizzati dell'utente
+  picker: null,           // selettore/libreria aperto: {mode, query, part, equip, detail, form}
   openSessions: new Set(),
   confirm: null,     // chiave del pulsante "armato" (eliminazione a due passaggi)
   lastBackup: null,
@@ -73,18 +76,19 @@ const state = {
 /* ---------- Esempi ---------- */
 // Ogni serie è [ripetizioni, kg]; same() crea serie identiche.
 const same = (n, reps, kg) => Array.from({ length: n }, () => [reps, kg]);
+// Gli esercizi sono id della libreria (data/esercizi.json).
 const EXAMPLE_PLANS = [
   { name: 'Push', exercises: [
-    ['Panca piana', [[10, 55], [8, 60], [8, 60], [6, 65]]], ['Spinte manubri panca inclinata', same(3, 10, 22)],
-    ['Lento avanti manubri', [[10, 14], [10, 16], [8, 16]]], ['Alzate laterali', same(3, 12, 8)], ['Push down ai cavi', same(3, 12, 25)],
+    ['panca-piana-bilanciere', [[10, 55], [8, 60], [8, 60], [6, 65]]], ['spinte-manubri-panca-inclinata', same(3, 10, 22)],
+    ['lento-avanti-manubri', [[10, 14], [10, 16], [8, 16]]], ['alzate-laterali-manubri', same(3, 12, 8)], ['push-down-cavo', same(3, 12, 25)],
   ] },
   { name: 'Pull', exercises: [
-    ['Trazioni', same(4, 6, 0)], ['Rematore bilanciere', [[10, 45], [8, 50], [8, 50], [6, 55]]], ['Lat machine', same(3, 10, 45)],
-    ['Face pull', same(3, 15, 15)], ['Curl bilanciere', same(3, 10, 25)],
+    ['trazioni-presa-prona', same(4, 6, 0)], ['rematore-bilanciere', [[10, 45], [8, 50], [8, 50], [6, 55]]], ['lat-machine-avanti', same(3, 10, 45)],
+    ['face-pull', same(3, 15, 15)], ['curl-bilanciere', same(3, 10, 25)],
   ] },
   { name: 'Gambe', exercises: [
-    ['Squat', [[8, 70], [6, 80], [6, 80], [5, 85]]], ['Stacco rumeno', same(3, 8, 70)], ['Pressa', same(3, 10, 120)],
-    ['Leg curl', same(3, 12, 35)], ['Calf raise', same(4, 12, 40)], ['Plank', same(3, 1, 0), { timer: 45 }],
+    ['squat-bilanciere', [[8, 70], [6, 80], [6, 80], [5, 85]]], ['stacco-rumeno', same(3, 8, 70)], ['leg-press', same(3, 10, 120)],
+    ['leg-curl-sdraiato', same(3, 12, 35)], ['calf-in-piedi-macchina', same(4, 12, 40)], ['plank', same(3, 1, 0), { timer: 45 }],
   ] },
 ];
 
@@ -93,33 +97,63 @@ function sortedSessions() {
   return [...state.sessions].sort((a, b) => b.date.localeCompare(a.date) || timeOf(b.createdAt) - timeOf(a.createdAt));
 }
 
-/** Ultima esecuzione di un esercizio (per nome, ignorando maiuscole e spazi). */
-function lastPerformance(name) {
-  const key = norm(name);
+/* ---------- Libreria ed esercizi ---------- */
+/**
+ * Chiave di un esercizio per storico, record e grafici: l'exerciseId; per i dati
+ * vecchi ancora senza id si ripiega sul nome (maiuscole e spazi ai bordi ignorati).
+ */
+const exKey = ex => (ex && ex.exerciseId) || `name:${norm(ex && ex.name)}`;
+const fold = s => Model.fold(s);
+
+async function loadLibrary() {
+  try {
+    const res = await fetch('data/esercizi.json');
+    if (!res.ok) throw new Error(res.status);
+    const lib = await res.json();
+    if (!Array.isArray(lib.exercises)) throw new Error('formato');
+    lib.byId = new Map(lib.exercises.map(e => [e.id, e]));
+    return lib;
+  } catch (err) {
+    console.warn('Libreria esercizi non disponibile:', err);
+    return null;
+  }
+}
+
+/** Scheda dell'esercizio: dalla libreria o tra i personalizzati (null se sconosciuto o eliminato). */
+function exerciseInfo(id) {
+  if (!id) return null;
+  return (state.library && state.library.byId.get(id)) || state.customExercises.find(c => c.id === id) || null;
+}
+
+/** Tutti gli esercizi selezionabili: libreria + personalizzati. */
+function allExercises() {
+  return [...(state.library ? state.library.exercises : []), ...state.customExercises];
+}
+
+/** Ultima esecuzione di un esercizio (per chiave: exerciseId o nome). */
+function lastPerformance(key) {
   for (const s of sortedSessions()) {
-    const ex = s.exercises.find(e => norm(e.name) === key && e.sets.length);
+    const ex = s.exercises.find(e => exKey(e) === key && e.sets.length);
     if (ex) return { date: s.date, sets: ex.sets };
   }
   return null;
 }
 
-/** Peso massimo mai sollevato in un esercizio (null se mai fatto). */
-function previousMax(name) {
-  const key = norm(name);
-  let max = null;
+/** Peso massimo mai sollevato in un esercizio (null se mai fatto), con la data. */
+function previousMax(key) {
+  let max = null, date = null;
   for (const s of state.sessions) for (const ex of s.exercises) {
-    if (norm(ex.name) !== key) continue;
-    for (const set of ex.sets) if (max === null || set.kg > max) max = set.kg;
+    if (exKey(ex) !== key) continue;
+    for (const set of ex.sets) if (max === null || set.kg > max || (set.kg === max && s.date < date)) { max = set.kg; date = s.date; }
   }
-  return max;
+  return max === null ? null : { max, date };
 }
 
 /** Storico di un esercizio in ordine cronologico, con le metriche per sessione. */
-function exerciseHistory(name) {
-  const key = norm(name);
+function exerciseHistory(key) {
   const out = [];
   for (const s of [...sortedSessions()].reverse()) {
-    const sets = s.exercises.filter(e => norm(e.name) === key).flatMap(e => e.sets);
+    const sets = s.exercises.filter(e => exKey(e) === key).flatMap(e => e.sets);
     if (!sets.length) continue;
     out.push({
       date: s.date, planName: s.planName, sets,
@@ -131,15 +165,20 @@ function exerciseHistory(name) {
   return out;
 }
 
-/** Nomi di esercizi conosciuti (storico prima, poi schede), senza doppioni. */
-function knownExerciseNames({ withHistoryOnly = false } = {}) {
+/**
+ * Esercizi già usati (storico prima, poi schede), senza doppioni: [{key, name}].
+ * Nome mostrato: quello attuale per i personalizzati, altrimenti l'ultimo usato.
+ */
+function knownExercises({ withHistoryOnly = false } = {}) {
   const seen = new Map();
-  for (const s of sortedSessions()) for (const ex of s.exercises) {
-    if (ex.sets.length && !seen.has(norm(ex.name))) seen.set(norm(ex.name), ex.name.trim());
-  }
-  if (!withHistoryOnly) for (const p of state.plans) for (const ex of p.exercises) {
-    if (!seen.has(norm(ex.name))) seen.set(norm(ex.name), ex.name.trim());
-  }
+  const add = ex => {
+    const key = exKey(ex);
+    if (seen.has(key)) return;
+    const custom = ex.exerciseId && Model.isCustomId(ex.exerciseId) ? exerciseInfo(ex.exerciseId) : null;
+    seen.set(key, { key, name: custom ? custom.name : String(ex.name).trim() });
+  };
+  for (const s of sortedSessions()) for (const ex of s.exercises) if (ex.sets.length) add(ex);
+  if (!withHistoryOnly) for (const p of state.plans) for (const ex of p.exercises) add(ex);
   return [...seen.values()];
 }
 
@@ -163,11 +202,13 @@ function confirmTwice(key) {
   }
   state.confirm = key;
   clearTimeout(armTimer);
-  armTimer = setTimeout(() => { if (state.confirm === key) { state.confirm = null; render(); } }, 4000);
-  render();
+  armTimer = setTimeout(() => { if (state.confirm === key) { state.confirm = null; refresh(); } }, 4000);
+  refresh();
   return false;
 }
 const armed = key => state.confirm === key;
+/** Ridisegna la vista attiva e, se aperto, il selettore esercizi. */
+function refresh() { render(); renderSheet(); }
 
 async function safely(fn) {
   try { await fn(); } catch (err) { console.error(err); toast(err.message || 'Qualcosa è andato storto.'); }
@@ -229,7 +270,7 @@ function renderDraft() {
   const pending = total - done;
 
   const exercises = d.exercises.map((ex, i) => {
-    const last = lastPerformance(ex.name);
+    const last = lastPerformance(exKey(ex));
     const rows = ex.sets.map((s, j) => `
       <div class="set-row ${s.done ? 'done' : ''}" data-i="${i}" data-j="${j}">
         <span class="set-n">${j + 1}</span>
@@ -280,11 +321,7 @@ function renderDraft() {
     </header>
     <label class="field date-wrap"><span>Data</span><input type="date" data-field="draft-date" value="${esc(d.date)}" max="${todayStr()}"></label>
     ${exercises || '<div class="card empty"><p>Nessun esercizio. Aggiungine uno qui sotto.</p></div>'}
-    <form class="add-ex" data-form="add-ex" autocomplete="off">
-      <input name="name" list="exercise-names-oggi" placeholder="Aggiungi esercizio…" aria-label="Nome esercizio da aggiungere" enterkeyhint="done">
-      <button type="submit" class="btn soft">Aggiungi</button>
-    </form>
-    <datalist id="exercise-names-oggi">${knownExerciseNames().map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+    <button type="button" class="btn soft block" data-action="picker-open" data-mode="draft">+ Aggiungi esercizio</button>
     <button type="button" class="btn primary big block ${armed('finish') ? 'armed' : ''}" data-action="finish">
       ${armed('finish') ? `Conferma: ${pending} ${pending === 1 ? 'serie non fatta verrà scartata' : 'serie non fatte verranno scartate'}` : 'Termina allenamento'}
     </button>
@@ -346,6 +383,7 @@ function startWorkout(planId) {
     planId: plan ? plan.id : null,
     planName: plan ? plan.name : 'Allenamento libero',
     exercises: plan ? plan.exercises.map(ex => ({
+      ...(ex.exerciseId ? { exerciseId: ex.exerciseId } : {}),
       name: ex.name,
       rest: restOf(ex),
       timer: Model.cleanTimer(ex.timer),
@@ -370,14 +408,15 @@ function repeatWorkout(planId) {
   const src = planId ? lastSessionOfPlan(planId) : sortedSessions()[0];
   if (!src) return toast('Nessun allenamento precedente.');
   const plan = state.plans.find(p => p.id === (planId || src.planId)) || null;
-  const planExercise = name => (plan && plan.exercises.find(e => norm(e.name) === norm(name)))
-    || state.plans.flatMap(p => p.exercises).find(e => norm(e.name) === norm(name)) || null;
+  const planExercise = key => (plan && plan.exercises.find(e => exKey(e) === key))
+    || state.plans.flatMap(p => p.exercises).find(e => exKey(e) === key) || null;
   beginDraft({
     planId: plan ? plan.id : null,
     planName: plan ? plan.name : src.planName,
     exercises: src.exercises.filter(ex => ex.sets.length).map(ex => {
-      const pe = planExercise(ex.name);
+      const pe = planExercise(exKey(ex));
       return {
+        ...(ex.exerciseId ? { exerciseId: ex.exerciseId } : {}),
         name: ex.name,
         rest: restOf(pe),
         timer: Model.cleanTimer(pe && pe.timer),
@@ -388,16 +427,17 @@ function repeatWorkout(planId) {
   toast(`Ripeti: ${src.planName} di ${fmtDateRel(src.date)}.`);
 }
 
-function addDraftExercise(name) {
-  name = name.trim();
-  if (!name) return;
-  const last = lastPerformance(name);
-  const fromPlan = state.plans.flatMap(p => p.exercises).find(e => norm(e.name) === norm(name));
+/** Aggiunge all'allenamento in corso un esercizio scelto dal selettore. */
+function addDraftExercise(info) {
+  const key = info.id;
+  const last = lastPerformance(key);
+  const fromPlan = state.plans.flatMap(p => p.exercises).find(e => e.exerciseId === key);
   let sets;
   if (last) sets = last.sets.map(s => ({ kg: fmtKgInput(s.kg), reps: String(s.reps), done: false }));
   else if (fromPlan) sets = planSetsToDraft(fromPlan.sets);
-  else sets = Array.from({ length: 3 }, () => ({ kg: '', reps: '', done: false }));
-  state.draft.exercises.push({ name, rest: restOf(fromPlan), timer: Model.cleanTimer(fromPlan && fromPlan.timer), sets });
+  else sets = Array.from({ length: 3 }, () => ({ kg: '', reps: info.timed ? '1' : '', done: false }));
+  const timer = fromPlan ? Model.cleanTimer(fromPlan.timer) : { enabled: !!info.timed, seconds: Model.TIMER.seconds };
+  state.draft.exercises.push({ exerciseId: info.id, name: info.name, rest: restOf(fromPlan), timer, sets });
   saveDraft();
   render();
 }
@@ -413,6 +453,7 @@ async function finishWorkout() {
   const d = state.draft;
   const exercises = d.exercises
     .map(ex => ({
+      ...(ex.exerciseId ? { exerciseId: ex.exerciseId } : {}),
       name: ex.name.trim(),
       sets: ex.sets.filter(s => s.done)
         .map(s => ({ kg: toNum(s.kg), reps: Math.round(toNum(s.reps)) }))
@@ -428,9 +469,9 @@ async function finishWorkout() {
   // Record: solo se il massimo supera quello precedente (la prima volta non conta).
   const records = [];
   for (const ex of exercises) {
-    const prev = previousMax(ex.name);
+    const prev = previousMax(exKey(ex));
     const max = Math.max(...ex.sets.map(s => s.kg));
-    if (prev !== null && max > prev && !records.some(r => norm(r.name) === norm(ex.name))) records.push({ name: ex.name, max, prev });
+    if (prev && max > prev.max && !records.some(r => r.key === exKey(ex))) records.push({ key: exKey(ex), name: ex.name, max, prev: prev.max });
   }
 
   const session = {
@@ -676,6 +717,7 @@ function renderSchede() {
       <button type="button" class="btn primary" data-action="plan-new">+ Nuova scheda</button>
       <button type="button" class="btn soft" data-action="plan-examples">Aggiungi esempi</button>
     </div>
+    <button type="button" class="btn block" data-action="picker-open" data-mode="browse">Libreria esercizi</button>
     ${cards || `<div class="card empty"><h2>Nessuna scheda</h2><p>Crea una scheda oppure aggiungi gli esempi Push, Pull e Gambe.</p></div>`}`;
 }
 
@@ -684,9 +726,10 @@ function renderEditor() {
   const rows = e.exercises.map((ex, k) => `
     <div class="ed-ex">
       <div class="top">
-        <label class="field"><span>Esercizio ${k + 1}</span>
-          <input type="text" data-efield="name" data-k="${k}" value="${esc(ex.name)}" list="exercise-names-schede" placeholder="Es. Panca piana" autocomplete="off"></label>
-        <button type="button" class="icon-btn" data-action="ed-remove-ex" data-k="${k}" aria-label="Rimuovi esercizio ${k + 1}">${ICON.close}</button>
+        <div class="ed-ex-name"><span class="muted">Esercizio ${k + 1}</span>
+          <strong>${esc(ex.name)}</strong>
+          ${(info => info ? `<span class="muted">${esc([info.bodyPart, info.equipment].filter(Boolean).join(' · '))}</span>` : '')(exerciseInfo(ex.exerciseId))}</div>
+        <button type="button" class="icon-btn" data-action="ed-remove-ex" data-k="${k}" aria-label="Rimuovi ${esc(ex.name)}">${ICON.close}</button>
       </div>
       <div class="ed-sets">
         <div class="ed-set-row head" aria-hidden="true"><span>#</span><span>Rip.</span><span>Kg</span><span></span></div>
@@ -724,27 +767,31 @@ function renderEditor() {
     <form class="card editor" data-form="editor" autocomplete="off">
       <label class="field"><span>Nome della scheda</span>
         <input type="text" data-efield="plan-name" value="${esc(e.name)}" placeholder="Es. Push" required></label>
-      ${rows}
-      <button type="button" class="btn soft" data-action="ed-add-ex">+ Esercizio</button>
+      ${rows || '<p class="muted">Nessun esercizio: aggiungili dalla libreria.</p>'}
+      <button type="button" class="btn soft" data-action="picker-open" data-mode="plan">+ Esercizio</button>
     </form>
-    <datalist id="exercise-names-schede">${knownExerciseNames().map(n => `<option value="${esc(n)}">`).join('')}</datalist>
     <div class="row">
       <button type="button" class="btn" data-action="ed-cancel">Annulla</button>
       <button type="button" class="btn primary" data-action="ed-save">Salva scheda</button>
     </div>`;
 }
 
-const blankEditorExercise = () => ({ id: uid(), name: '', rest: Model.REST.default, timer: { enabled: false, seconds: String(Model.TIMER.seconds) }, sets: Array.from({ length: 3 }, () => ({ reps: '10', weight: '' })) });
+/** Esercizio nuovo per l'editor, scelto dalla libreria: se è a tempo il timer parte acceso (30 s). */
+const editorExerciseFrom = info => ({
+  id: uid(), exerciseId: info.id, name: info.name, rest: Model.REST.default,
+  timer: { enabled: !!info.timed, seconds: String(Model.TIMER.seconds) },
+  sets: Array.from({ length: 3 }, () => ({ reps: info.timed ? '1' : '10', weight: '' })),
+});
 
 function openEditor(planId) {
   const p = state.plans.find(x => x.id === planId);
   state.editor = p
     ? { id: p.id, name: p.name, exercises: p.exercises.map(ex => ({
-        id: ex.id || uid(), name: ex.name, rest: restOf(ex),
+        id: ex.id || uid(), exerciseId: ex.exerciseId, name: ex.name, rest: restOf(ex),
         timer: (tm => ({ enabled: tm.enabled, seconds: String(tm.seconds) }))(Model.cleanTimer(ex.timer)),
         sets: ex.sets.map(s => ({ reps: String(s.reps), weight: fmtKgInput(s.weight) })),
       })) }
-    : { id: null, name: '', exercises: [blankEditorExercise()] };
+    : { id: null, name: '', exercises: [] };
   render();
   window.scrollTo(0, 0);
 }
@@ -755,7 +802,7 @@ async function saveEditor() {
   if (!name) return toast('Dai un nome alla scheda.');
   const exercises = e.exercises
     .filter(ex => ex.name.trim())
-    .map(ex => Model.migratePlanExercise({ id: ex.id, name: ex.name, sets: ex.sets, rest: ex.rest, timer: ex.timer })); // pulisce i valori (rip ≥ 1, kg ≥ 0)
+    .map(ex => Model.migratePlanExercise({ id: ex.id, exerciseId: ex.exerciseId, name: ex.name, sets: ex.sets, rest: ex.rest, timer: ex.timer })); // pulisce i valori (rip ≥ 1, kg ≥ 0)
   if (!exercises.length) return toast('Aggiungi almeno un esercizio.');
   const plan = { id: e.id || uid(), name, exercises };
   const plans = e.id ? state.plans.map(p => p.id === e.id ? plan : p) : [...state.plans, plan];
@@ -767,12 +814,13 @@ async function saveEditor() {
 }
 
 async function addExamplePlans() {
+  if (!state.library) return toast('La libreria esercizi non è disponibile: riprova con la connessione.');
   const existing = new Set(state.plans.map(p => norm(p.name)));
   const toAdd = EXAMPLE_PLANS.filter(p => !existing.has(norm(p.name))).map(p => ({
     id: uid(),
     name: p.name,
-    exercises: p.exercises.map(([name, sets, opt = {}]) => Model.migratePlanExercise({
-      id: uid(), name, sets: sets.map(([reps, weight]) => ({ reps, weight })),
+    exercises: p.exercises.map(([exerciseId, sets, opt = {}]) => Model.migratePlanExercise({
+      id: uid(), exerciseId, name: exerciseInfo(exerciseId).name, sets: sets.map(([reps, weight]) => ({ reps, weight })),
       timer: opt.timer ? { enabled: true, seconds: opt.timer } : undefined,
     })),
   }));
@@ -782,6 +830,222 @@ async function addExamplePlans() {
   state.plans = plans;
   toast(`Aggiunte ${toAdd.length} schede di esempio.`);
   render();
+}
+
+/* =========================================================================
+   SELETTORE ESERCIZI E LIBRERIA (foglio a tutto schermo)
+   mode: 'plan' (editor scheda), 'draft' (allenamento in corso), 'browse' (solo consultazione)
+   ========================================================================= */
+const PICKER_TITLES = { plan: 'Aggiungi esercizio', draft: 'Aggiungi esercizio', browse: 'Libreria esercizi' };
+const ICON_MEDIA = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6M6 6v12M18 6v12M21 9v6M6 12h12"/></svg>';
+
+function openPicker(mode) {
+  state.picker = { mode, query: '', part: '', equip: '', detail: null, form: null, listScroll: 0 };
+  renderSheet();
+  $('#sheet').scrollTop = 0;
+}
+
+function closePicker() {
+  state.picker = null;
+  state.confirm = null;
+  renderSheet();
+}
+
+/** Ricerca senza accenti su nome e alias (tutte le parole devono comparire), più i filtri. */
+function pickerMatches() {
+  const { query, part, equip } = state.picker;
+  const words = query.split(/\s+/).map(fold).filter(Boolean);
+  return allExercises()
+    .filter(e => (!part || e.bodyPart === part) && (!equip || e.equipment === equip))
+    .filter(e => !words.length || words.every(w => [e.name, ...(e.aliases || [])].some(label => fold(label).includes(w))))
+    .sort((a, b) => a.name.localeCompare(b.name, 'it'));
+}
+
+function renderSheet() {
+  const el = $('#sheet');
+  const p = state.picker;
+  document.body.classList.toggle('sheet-open', !!p);
+  if (!p) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  el.innerHTML = p.form ? renderCustomForm() : p.detail ? renderExerciseDetail() : renderPickerList();
+}
+
+const sheetHead = (left, title) => `
+  <header class="sheet-head">
+    ${left}
+    <button type="button" class="icon-btn" data-action="picker-close" aria-label="Chiudi">${ICON.close}</button>
+  </header>
+  ${title ? `<h2 id="sheet-title">${esc(title)}</h2>` : ''}`;
+
+function renderPickerList() {
+  const p = state.picker;
+  const parts = Model.BODY_PARTS;
+  return `
+    <div class="sheet-inner">
+      ${sheetHead('<span></span>', PICKER_TITLES[p.mode])}
+      <input type="search" class="picker-search" data-field="picker-query" value="${esc(p.query)}"
+        placeholder="Cerca (es. panca, squat, bench press)" aria-label="Cerca esercizio" autocomplete="off" enterkeyhint="search">
+      <div class="chips" role="group" aria-label="Parte del corpo">
+        ${['', ...parts].map(v => `<button type="button" class="chip" data-action="picker-part" data-part="${esc(v)}" aria-pressed="${p.part === v}">${esc(v || 'Tutte')}</button>`).join('')}
+      </div>
+      <label class="field"><span>Attrezzo</span>
+        <select data-field="picker-equip">
+          <option value="">Tutti gli attrezzi</option>
+          ${Model.EQUIPMENT.map(v => `<option value="${esc(v)}" ${p.equip === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+        </select></label>
+      ${state.library ? '' : '<p class="warn-box">La libreria non è disponibile in questo momento: compaiono solo i tuoi esercizi personalizzati.</p>'}
+      <div id="picker-results">${renderPickerResults()}</div>
+      <button type="button" class="btn block" data-action="custom-new">+ Crea esercizio personalizzato</button>
+    </div>`;
+}
+
+function renderPickerResults() {
+  const list = pickerMatches();
+  if (!list.length) return '<p class="muted picker-count">Nessun esercizio trovato.</p>';
+  return `
+    <p class="muted picker-count">${plural(list.length, 'esercizio', 'esercizi')}</p>
+    <ul class="pick-list">${list.map(e => `
+      <li><button type="button" class="pick-item" data-action="picker-detail" data-id="${esc(e.id)}">
+        <span class="pi-main"><strong>${esc(e.name)}</strong>
+          <span class="meta">${esc([e.bodyPart, e.equipment, e.timed ? 'a tempo' : '', Model.isCustomId(e.id) ? 'personalizzato' : ''].filter(Boolean).join(' · '))}</span></span>
+        <span class="pi-chev" aria-hidden="true">›</span>
+      </button></li>`).join('')}
+    </ul>`;
+}
+
+function renderExerciseDetail() {
+  const p = state.picker;
+  const e = exerciseInfo(p.detail);
+  if (!e) { p.detail = null; return renderPickerList(); }
+  const custom = Model.isCustomId(e.id);
+  const rec = previousMax(e.id);
+  const last = lastPerformance(e.id);
+  const delKey = `cx-${e.id}`;
+  const listOrDash = arr => arr && arr.length ? esc(arr.join(', ')) : '–';
+  return `
+    <div class="sheet-inner">
+      ${sheetHead('<button type="button" class="btn ghost small" data-action="picker-back">‹ Elenco</button>', '')}
+      <div class="ex-media" aria-hidden="true">${ICON_MEDIA}</div>
+      <h2 id="sheet-title">${esc(e.name)}</h2>
+      ${e.aliases && e.aliases.length ? `<p class="muted">Anche: ${esc(e.aliases.join(', '))}</p>` : ''}
+      <div class="tags">
+        ${e.bodyPart ? `<span class="tag">${esc(e.bodyPart)}</span>` : ''}
+        <span class="tag">${esc(e.equipment)}</span>
+        ${e.timed ? '<span class="tag">A tempo</span>' : ''}
+        ${custom ? '<span class="tag custom">Personalizzato</span>' : ''}
+      </div>
+      <dl class="ex-facts">
+        <dt>Muscoli principali</dt><dd>${listOrDash(e.muscles)}</dd>
+        <dt>Muscoli secondari</dt><dd>${listOrDash(e.secondary)}</dd>
+      </dl>
+      ${e.instructions ? `<h3>Esecuzione</h3><p class="ex-instructions">${esc(e.instructions)}</p>` : ''}
+      ${rec || last ? `
+      <div class="tiles">
+        ${rec ? `<div class="tile record"><div class="label">Il mio record</div><div class="value">${fmt(rec.max, 2)}<small>kg</small></div><div class="hint">${esc(fmtDateRel(rec.date))}</div></div>` : ''}
+        ${last ? `<div class="tile"><div class="label">Ultima volta</div><div class="value small-value">${esc(fmtDateRel(last.date))}</div><div class="hint num">${esc(setsText(last.sets))}</div></div>` : ''}
+      </div>` : ''}
+      ${p.mode !== 'browse' ? `<button type="button" class="btn primary big block" data-action="picker-add" data-id="${esc(e.id)}">Aggiungi</button>` : ''}
+      ${custom ? `
+      <div class="row">
+        <button type="button" class="btn" data-action="custom-edit" data-id="${esc(e.id)}">Modifica</button>
+        <button type="button" class="btn danger ${armed(delKey) ? 'armed' : ''}" data-action="custom-delete" data-id="${esc(e.id)}">${armed(delKey) ? 'Tocca ancora per eliminare' : 'Elimina'}</button>
+      </div>
+      <p class="muted small-note">Eliminarlo non cambia gli allenamenti già registrati.</p>` : ''}
+    </div>`;
+}
+
+function renderCustomForm() {
+  const f = state.picker.form;
+  return `
+    <div class="sheet-inner">
+      ${sheetHead('<button type="button" class="btn ghost small" data-action="custom-cancel">‹ Indietro</button>', f.id ? 'Modifica esercizio' : 'Nuovo esercizio personalizzato')}
+      <form class="custom-form" data-form="custom-ex" autocomplete="off">
+        <label class="field"><span>Nome</span>
+          <input type="text" data-cfield="name" value="${esc(f.name)}" maxlength="80" required placeholder="Es. Spinte alla macchina convergente"></label>
+        <label class="field"><span>Parte del corpo</span>
+          <select data-cfield="bodyPart"><option value="">–</option>
+            ${Model.BODY_PARTS.map(v => `<option value="${esc(v)}" ${f.bodyPart === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></label>
+        <label class="field"><span>Attrezzo</span>
+          <select data-cfield="equipment">
+            ${Model.EQUIPMENT.map(v => `<option value="${esc(v)}" ${f.equipment === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></label>
+        <label class="field"><span>Muscoli principali (separati da virgola)</span>
+          <input type="text" data-cfield="muscles" value="${esc(f.muscles)}" placeholder="Es. Grande pettorale, Tricipite"></label>
+        <label class="field"><span>Istruzioni</span>
+          <textarea data-cfield="instructions" rows="3" maxlength="1000" placeholder="Come si esegue, in 2-3 frasi">${esc(f.instructions)}</textarea></label>
+        <label class="switch-row"><span>Esercizio a tempo (plank, isometrie)</span>
+          <input type="checkbox" role="switch" class="switch" data-cfield="timed" ${f.timed ? 'checked' : ''}></label>
+        <button type="submit" class="btn primary big block">${f.id ? 'Salva modifiche' : 'Crea esercizio'}</button>
+      </form>
+    </div>`;
+}
+
+function openCustomForm(id) {
+  const c = id ? state.customExercises.find(x => x.id === id) : null;
+  state.picker.form = c
+    ? { id: c.id, name: c.name, bodyPart: c.bodyPart, equipment: c.equipment, muscles: c.muscles.join(', '), instructions: c.instructions, timed: c.timed }
+    : { id: null, name: state.picker.query.trim(), bodyPart: state.picker.part, equipment: state.picker.equip || 'altro', muscles: '', instructions: '', timed: false };
+  renderSheet();
+  $('#sheet').scrollTop = 0;
+}
+
+async function saveCustomForm() {
+  const p = state.picker;
+  const f = p.form;
+  const name = String(f.name || '').trim();
+  if (!name) return toast('Dai un nome all\'esercizio.');
+  const clash = allExercises().find(e => e.id !== f.id && [e.name, ...(e.aliases || [])].some(label => fold(label) === fold(name)));
+  if (clash) {
+    toast(`Esiste già: ${clash.name}.`);
+    p.form = null; p.detail = clash.id;
+    return renderSheet();
+  }
+  const existing = f.id ? state.customExercises.find(x => x.id === f.id) : {};
+  const c = Model.cleanCustomExercise({ ...existing, ...f, id: f.id || undefined, name }, new Set(state.customExercises.map(x => x.id)));
+  let list;
+  if (f.id) {
+    list = state.customExercises.map(x => x.id === f.id ? c : x);
+    // Il nome nuovo vale per schede e allenamento in corso; lo storico resta com'era.
+    const plans = state.plans.map(pl => ({ ...pl, exercises: pl.exercises.map(ex => ex.exerciseId === c.id ? { ...ex, name: c.name } : ex) }));
+    await Store.savePlans(plans);
+    state.plans = plans;
+    if (state.draft) { state.draft.exercises.forEach(ex => { if (ex.exerciseId === c.id) ex.name = c.name; }); saveDraft(); }
+    if (state.editor) state.editor.exercises.forEach(ex => { if (ex.exerciseId === c.id) ex.name = c.name; });
+  } else {
+    list = [...state.customExercises, c];
+  }
+  await Store.saveCustomExercises(list);
+  state.customExercises = list;
+  p.form = null;
+  if (!f.id && p.mode !== 'browse') return pickExercise(c.id);
+  p.detail = c.id;
+  toast(f.id ? 'Esercizio aggiornato.' : 'Esercizio creato.');
+  refresh();
+}
+
+async function deleteCustomExercise(id) {
+  const list = state.customExercises.filter(c => c.id !== id);
+  await Store.saveCustomExercises(list);
+  state.customExercises = list;
+  state.picker.detail = null;
+  toast('Esercizio eliminato. Lo storico resta invariato.');
+  refresh();
+}
+
+/** Aggiunge l'esercizio scelto all'editor della scheda o all'allenamento in corso. */
+function pickExercise(id) {
+  const info = exerciseInfo(id);
+  if (!info || !state.picker) return;
+  const mode = state.picker.mode;
+  closePicker();
+  if (mode === 'plan' && state.editor) {
+    state.editor.exercises.push(editorExerciseFrom(info));
+    render();
+    [...document.querySelectorAll('#view-schede .ed-ex')].pop()?.scrollIntoView({ block: 'center' });
+  } else if (mode === 'draft' && state.draft) {
+    addDraftExercise(info);
+    [...document.querySelectorAll('#view-oggi article.card')].pop()?.scrollIntoView({ block: 'start' });
+  }
+  toast(`Aggiunto: ${info.name}.`);
 }
 
 /* =========================================================================
@@ -807,12 +1071,12 @@ function renderProgressi() {
 }
 
 function renderExerciseProgress() {
-  const names = knownExerciseNames({ withHistoryOnly: true });
-  if (!names.length) {
+  const known = knownExercises({ withHistoryOnly: true });
+  if (!known.length) {
     return `
       <div class="card empty"><h2>Ancora nessun dato</h2><p>Termina il primo allenamento e qui vedrai grafici e record per ogni esercizio.</p></div>`;
   }
-  if (!names.some(n => norm(n) === norm(state.progress.exercise))) state.progress.exercise = names[0];
+  if (!known.some(k => k.key === state.progress.exercise)) state.progress.exercise = known[0].key;
 
   const metric = METRICS[state.progress.metric];
   const hist = exerciseHistory(state.progress.exercise);
@@ -828,7 +1092,7 @@ function renderExerciseProgress() {
 
   return `
     <label class="field"><span>Esercizio</span>
-      <select data-field="progress-ex">${names.map(n => `<option value="${esc(n)}" ${norm(n) === norm(state.progress.exercise) ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+      <select data-field="progress-ex">${known.map(k => `<option value="${esc(k.key)}" ${k.key === state.progress.exercise ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</select>
     </label>
     <div class="segmented" role="group" aria-label="Metrica">
       ${Object.entries(METRICS).map(([k, m]) => `<button type="button" data-action="metric" data-metric="${k}" aria-pressed="${k === state.progress.metric}">${m.label}</button>`).join('')}
@@ -1085,11 +1349,13 @@ async function exportData() {
   const data = {
     app: 'diario-palestra',
     version: Model.DATA_VERSION, // versione del modello dati (vedi model.js)
+    libraryVersion: state.library ? state.library.libraryVersion : null,
     exportedAt: new Date().toISOString(),
     plans: state.plans,
     sessions: state.sessions,
     bodyWeights: state.bodyWeights,
     settings: state.settings,
+    customExercises: state.customExercises,
   };
   const name = `diario-palestra-${todayStr()}.json`;
   const json = JSON.stringify(data, null, 2);
@@ -1122,6 +1388,7 @@ function cleanSession(s) {
   const exercises = s.exercises
     .filter(ex => ex && String(ex.name ?? '').trim() && Array.isArray(ex.sets))
     .map(ex => ({
+      ...(ex.exerciseId ? { exerciseId: String(ex.exerciseId) } : {}),
       name: String(ex.name).trim(),
       sets: ex.sets.map(x => ({ kg: toNum(x && x.kg), reps: Math.round(toNum(x && x.reps)) })).filter(x => x.kg >= 0 && x.reps >= 1),
     }))
@@ -1162,12 +1429,22 @@ async function importFile(file) {
   // Impostazioni: quelle del backup, se presenti (fino alla versione 4 non c'erano)
   const settings = data.settings && typeof data.settings === 'object' ? Model.cleanSettings(data.settings) : state.settings;
 
-  const next = { plans: [...plans.values()], sessions: [...sessions.values()], bodyWeights: Model.cleanBodyWeights([...weights.values()]), settings };
+  // Esercizi personalizzati: uniti per id. Poi i nomi senza id (backup fino alla v5)
+  // vengono collegati come nella migrazione: libreria, personalizzati o nuovi personalizzati.
+  const customs = new Map(state.customExercises.map(c => [c.id, c]));
+  Model.cleanCustomExercises(data.customExercises).forEach(c => customs.set(c.id, c));
+  const linked = Model.linkExercises({ plans: [...plans.values()], sessions: [...sessions.values()], customExercises: [...customs.values()] }, state.library);
+
+  const next = {
+    plans: linked.plans, sessions: linked.sessions, customExercises: linked.customExercises,
+    bodyWeights: Model.cleanBodyWeights([...weights.values()]), settings,
+  };
   await Store.replaceAll(next);
   state.settings = next.settings;
   state.plans = next.plans;
   state.sessions = next.sessions;
   state.bodyWeights = next.bodyWeights;
+  state.customExercises = next.customExercises;
   toast(`Importati: ${plural(sessionsIn.length, 'allenamento', 'allenamenti')}, ${plural(plansIn.length, 'scheda', 'schede')}, ${plural(weightsIn.length, 'peso', 'pesi')}.`);
   render();
 }
@@ -1271,11 +1548,32 @@ const ACTIONS = {
     render();
   },
   'plan-examples': () => addExamplePlans(),
-  'ed-add-ex': () => {
-    state.editor.exercises.push(blankEditorExercise());
-    render();
-    const inputs = document.querySelectorAll('[data-efield="name"]');
-    inputs[inputs.length - 1]?.focus();
+  'picker-open': el => openPicker(el.dataset.mode),
+  'picker-close': () => closePicker(),
+  'picker-part': el => {
+    state.picker.part = el.dataset.part;
+    document.querySelectorAll('#sheet .chip').forEach(c => c.setAttribute('aria-pressed', String(c.dataset.part === state.picker.part)));
+    $('#picker-results').innerHTML = renderPickerResults();
+  },
+  'picker-detail': el => {
+    state.picker.listScroll = $('#sheet').scrollTop;
+    state.picker.detail = el.dataset.id;
+    renderSheet();
+    $('#sheet').scrollTop = 0;
+  },
+  'picker-back': () => {
+    state.picker.detail = null;
+    state.confirm = null;
+    renderSheet();
+    $('#sheet').scrollTop = state.picker.listScroll || 0;
+  },
+  'picker-add': el => pickExercise(el.dataset.id),
+  'custom-new': () => openCustomForm(null),
+  'custom-edit': el => openCustomForm(el.dataset.id),
+  'custom-cancel': () => { state.picker.form = null; renderSheet(); },
+  'custom-delete': async el => {
+    if (!confirmTwice(`cx-${el.dataset.id}`)) return;
+    await deleteCustomExercise(el.dataset.id);
   },
   'ed-rest': el => {
     const ex = state.editor.exercises[+el.dataset.k];
@@ -1373,6 +1671,16 @@ document.addEventListener('input', e => {
     if (t.value) { state.draft.date = t.value; saveDraft(); }
     return;
   }
+  // Selettore esercizi: aggiorno solo l'elenco, così il campo di ricerca resta attivo
+  if (t.dataset.field === 'picker-query' && state.picker) {
+    state.picker.query = t.value;
+    $('#picker-results').innerHTML = renderPickerResults();
+    return;
+  }
+  if (t.dataset.cfield && state.picker && state.picker.form) {
+    state.picker.form[t.dataset.cfield] = t.type === 'checkbox' ? t.checked : t.value;
+    return;
+  }
   // Peso corporeo: il valore resta tra un ridisegno e l'altro
   if (t.dataset.bfield === 'kg') { state.bodyForm.kg = t.value; return; }
   // Editor della scheda
@@ -1391,6 +1699,11 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.dataset.field === 'progress-ex') { state.progress.exercise = t.value; render(); return; }
+  if (t.dataset.field === 'picker-equip' && state.picker) {
+    state.picker.equip = t.value;
+    $('#picker-results').innerHTML = renderPickerResults();
+    return;
+  }
   if (t.dataset.field === 'kg' && state.draft) {
     const row = t.closest('.set-row');
     const n = toNum(t.value);
@@ -1411,10 +1724,9 @@ document.addEventListener('change', e => {
 
 document.addEventListener('submit', e => {
   const form = e.target;
-  if (form.dataset.form === 'add-ex') {
+  if (form.dataset.form === 'custom-ex') {
     e.preventDefault();
-    addDraftExercise(form.elements.name.value);
-    $('[data-form="add-ex"] input')?.focus();
+    safely(saveCustomForm);
   } else if (form.dataset.form === 'body-weight') {
     e.preventDefault();
     document.activeElement && document.activeElement.blur(); // chiude la tastiera
@@ -1424,6 +1736,9 @@ document.addEventListener('submit', e => {
     safely(saveEditor);
   }
 });
+
+// Esc chiude il selettore (tastiera esterna).
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && state.picker) closePicker(); });
 
 // Invio sulla tastiera: passa al campo successivo della serie.
 document.addEventListener('keydown', e => {
@@ -1489,7 +1804,9 @@ async function registerServiceWorker() {
 /* ---------- Avvio ---------- */
 (async function init() {
   try {
-    const data = await Store.load();
+    state.library = await loadLibrary();
+    const data = await Store.load(state.library);
+    state.customExercises = data.customExercises || [];
     state.plans = data.plans;
     state.sessions = data.sessions;
     state.bodyWeights = data.bodyWeights || [];

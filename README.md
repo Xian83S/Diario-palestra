@@ -10,6 +10,7 @@ Diario di allenamento da installare su iPhone: si apre dall'icona sulla Home, a 
 | `index.html` | La pagina dell'app con i meta tag per la modalità app su iPhone |
 | `style.css` | Grafica: tema chiaro e scuro automatico, font Barlow / Barlow Condensed |
 | `app.js` | Interfaccia: Oggi, Schede, Progressi, Storico, backup |
+| `data/esercizi.json` | Libreria di 170 esercizi in italiano (nome, alias, parte del corpo, muscoli, attrezzo, istruzioni). Si genera con `tools/build-library.py` |
 | `model.js` | Versione del modello dati e migrazione automatica dei dati vecchi (usata al caricamento e all'importazione dei backup) |
 | `storage.js` | Livello di accesso ai dati (`load`, `savePlans`, `saveSession`, `deleteSession`, …). Oggi usa la memoria del telefono (localStorage). È l'unico file da sostituire per passare in futuro a un servizio esterno |
 | `sw.js` | Service worker: salva i file dell'app sul telefono per l'uso offline |
@@ -49,11 +50,46 @@ Il codice è già su GitHub, quindi questa è la strada più breve. L'indirizzo 
 
 > I dati salvati dall'icona sulla Home e quelli salvati da Safari sono **separati**. Usa sempre l'icona.
 
+## Libreria esercizi
+
+- **Dove si apre:**
+  - **Aggiungere esercizi:** "+ Esercizio" nell'editor della scheda o "+ Aggiungi esercizio" durante l'allenamento apre il selettore.
+  - **Consultare:** **Schede → Libreria esercizi** apre la libreria in sola lettura.
+- **Il selettore:**
+  - La ricerca ignora maiuscole e accenti e guarda il nome e gli alias, anche inglesi ("bench press").
+  - Le parti del corpo sono bottoni in riga, l'attrezzo si sceglie da un menu.
+  - Un tocco apre il dettaglio: parte del corpo, muscoli, attrezzo, istruzioni e, se ci sono, il tuo record e l'ultima volta. Da lì si aggiunge con **Aggiungi**.
+  - In cima al dettaglio c'è lo spazio per un'immagine futura.
+- **Esercizi a tempo:** un esercizio a tempo (`timed`, es. Plank) aggiunto a una scheda parte con il timer acceso a 30 secondi, modificabili.
+- **Esercizi personalizzati:** "Crea esercizio personalizzato" in fondo al selettore.
+  - Si modificano e si eliminano dal loro dettaglio.
+  - Rinominarne uno aggiorna le schede; lo storico conserva il nome di allora.
+  - Eliminarne uno non tocca gli allenamenti registrati: grafici e storico restano.
+  - L'id nasce dal nome (`custom-panca-convergente`), quindi lo stesso nome ha lo stesso id su ogni dispositivo e importare un backup non crea doppioni.
+- **Grafici, record, "Ultima volta" e "Ripeti ultimo"** lavorano per `exerciseId`. Per i dati ancora senza id usano il nome.
+
+### Migrazione dei dati esistenti (versione 6)
+
+- Al primo avvio ogni nome già usato viene collegato a un esercizio della libreria. Il confronto ignora maiuscole, spazi, accenti e trattini e guarda anche gli alias (per esempio "Panca piana" diventa `panca-piana-bilanciere`).
+- I nomi senza corrispondenza diventano esercizi personalizzati con lo stesso nome.
+- Vengono aggiunti solo gli id: nomi, serie e date restano com'erano.
+- Prima della migrazione l'app salva una copia di schede e sessioni (`diarioPalestra.plans.v5`, `diarioPalestra.sessions.v5`).
+- Perché storico e grafici restino **identici**, due nomi che prima erano esercizi diversi restano diversi. Se per esempio usavi sia "Panca piana" sia "Bench press", che sono alias dello stesso esercizio, il nome più usato viene collegato alla libreria e l'altro diventa personalizzato.
+- La migrazione parte solo se la libreria è stata caricata. Altrimenti l'app funziona come prima, per nome, e riprova al prossimo avvio.
+- I backup vecchi senza id vengono collegati allo stesso modo quando li importi.
+
+### Aggiornare la libreria
+
+1. Modifica `tools/build-library.py`. Non cambiare mai gli `id` esistenti.
+2. Aumenta `LIBRARY_VERSION`.
+3. Esegui `python3 tools/build-library.py`. Lo script controlla che id e alias siano unici, che parti del corpo e attrezzi siano tra quelli ammessi e che le istruzioni abbiano 2-3 frasi, poi riscrive `data/esercizi.json`.
+4. Aumenta `VERSION` in `sw.js`.
+
 ## Ripeti ultimo allenamento
 
 - In **Oggi** ogni scheda ha due pulsanti:
   - **Inizia** parte con i valori previsti dalla scheda.
-  - **Ripeti ultimo** copia esercizi e serie dell'ultima sessione registrata con quella scheda, con i kg e le ripetizioni effettivamente fatti.
+  - **Ripeti ultimo** copia esercizi (con il loro `exerciseId`) e serie dell'ultima sessione registrata con quella scheda, con i kg e le ripetizioni effettivamente fatti.
 - **Allenamento libero** ha **Ripeti ultimo allenamento**, che copia l'ultima sessione in assoluto, di qualsiasi scheda.
 - Tutte le serie partono non segnate. La data è quella di oggi e l'id è nuovo: la sessione di origine non viene toccata.
 - Recupero e timer degli esercizi vengono dalla scheda.
@@ -112,6 +148,7 @@ Il formato dei dati ha un numero di versione (`Model.DATA_VERSION` in `model.js`
 - **Versione 1:** ogni esercizio di una scheda aveva `sets`, `reps` e `weight` unici (es. 4 serie da 8 a 60 kg).
 - **Versione 2:** ogni serie ha le proprie ripetizioni e il proprio peso: `sets: [{reps: 10, weight: 55}, {reps: 8, weight: 60}, …]`, più il recupero `rest` in secondi.
 - **Versione 3:** ogni esercizio ha anche `timer: {enabled, seconds}` per gli esercizi a tempo. Per le schede esistenti vale `{enabled: false, seconds: 30}`.
+- **Versione 6:** ogni esercizio di schede e sessioni ha `exerciseId` (id della libreria oppure `custom-…`) più `name`, cioè il nome al momento. Nuova raccolta `customExercises` per gli esercizi personalizzati. Vedi "Libreria esercizi" più sotto.
 - **Versione 5:** impostazioni `settings: {weightStep}`, cioè il passo dei pulsanti − e + dei kg (1, 2,5 o 5; predefinito 2,5). Sono incluse nei backup.
 - **Versione 4:** nuova raccolta `bodyWeights` per il peso corporeo, `[{id, date, kg, createdAt}]`, con al massimo una registrazione per data. Viene inclusa nei backup.
 
