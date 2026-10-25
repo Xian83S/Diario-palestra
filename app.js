@@ -44,6 +44,10 @@ const sessionSetCount = session => session.exercises.reduce((sum, ex) => sum + e
 const setsText = sets => sets.map(s => `${fmt(s.kg, 2)}×${s.reps}`).join(' · ');
 const fmtDur = sec => { sec = Math.max(0, Math.ceil(sec)); return `${Math.floor(sec / 60)}:${pad(sec % 60)}`; };
 const restOf = ex => Model.cleanRest(ex && ex.rest);
+/** Timer iniziale di un esercizio: quello della scheda se c'è, altrimenti acceso a 30 s solo se è "a tempo". */
+const defaultTimer = (info, fromPlan) => fromPlan ? Model.cleanTimer(fromPlan.timer) : { enabled: !!(info && info.timed), seconds: Model.TIMER.seconds };
+/** Secondi digitati: vuoto o non valido = 0 (nessun pulsante "Avvia timer"), massimo 3600. */
+const typedSeconds = v => { const n = Math.round(toNum(v)); return Number.isFinite(n) && n > 0 ? Math.min(Model.TIMER.max, n) : 0; };
 
 const ICON = {
   check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
@@ -308,6 +312,17 @@ function renderDraft() {
         <button type="button" class="btn small block rest-btn" data-action="rest-start" data-i="${i}">
           ${ICON.timer}<span>Recupero <span class="num">${fmtDur(restOf(ex))}</span></span>
         </button>
+        ${(tm => `
+        <div class="ex-timer-row">
+          <label class="switch-row">
+            <span class="rest-label">${ICON.timer} Timer esercizio</span>
+            <input type="checkbox" role="switch" class="switch" data-dfield="timer-enabled" data-i="${i}" ${tm.enabled ? 'checked' : ''}
+              aria-label="Timer per ${esc(ex.name)}, solo in questo allenamento">
+          </label>
+          ${tm.enabled ? `
+          <label class="field timer-seconds"><span>Durata (secondi)</span>
+            <input type="text" inputmode="numeric" autocomplete="off" enterkeyhint="done" data-dfield="timer-seconds" data-i="${i}" value="${tm.seconds}"></label>` : ''}
+        </div>`)(Model.cleanTimer(ex.timer))}
       </article>`;
   }).join('');
 
@@ -428,7 +443,7 @@ function repeatWorkout(planId) {
 }
 
 /** Aggiunge all'allenamento in corso un esercizio scelto dal selettore. */
-function addDraftExercise(info) {
+function addDraftExercise(info, timerChoice) {
   const key = info.id;
   const last = lastPerformance(key);
   const fromPlan = state.plans.flatMap(p => p.exercises).find(e => e.exerciseId === key);
@@ -436,7 +451,7 @@ function addDraftExercise(info) {
   if (last) sets = last.sets.map(s => ({ kg: fmtKgInput(s.kg), reps: String(s.reps), done: false }));
   else if (fromPlan) sets = planSetsToDraft(fromPlan.sets);
   else sets = Array.from({ length: 3 }, () => ({ kg: '', reps: info.timed ? '1' : '', done: false }));
-  const timer = fromPlan ? Model.cleanTimer(fromPlan.timer) : { enabled: !!info.timed, seconds: Model.TIMER.seconds };
+  const timer = timerChoice ? Model.cleanTimer(timerChoice) : defaultTimer(info, fromPlan);
   state.draft.exercises.push({ exerciseId: info.id, name: info.name, rest: restOf(fromPlan), timer, sets });
   saveDraft();
   render();
@@ -777,9 +792,9 @@ function renderEditor() {
 }
 
 /** Esercizio nuovo per l'editor, scelto dalla libreria: se è a tempo il timer parte acceso (30 s). */
-const editorExerciseFrom = info => ({
+const editorExerciseFrom = (info, timerChoice) => ({
   id: uid(), exerciseId: info.id, name: info.name, rest: Model.REST.default,
-  timer: { enabled: !!info.timed, seconds: String(Model.TIMER.seconds) },
+  timer: (tm => ({ enabled: tm.enabled, seconds: String(tm.seconds) }))(timerChoice ? Model.cleanTimer(timerChoice) : defaultTimer(info)),
   sets: Array.from({ length: 3 }, () => ({ reps: info.timed ? '1' : '10', weight: '' })),
 });
 
@@ -944,6 +959,16 @@ function renderExerciseDetail() {
         ${rec ? `<div class="tile record"><div class="label">Il mio record</div><div class="value">${fmt(rec.max, 2)}<small>kg</small></div><div class="hint">${esc(fmtDateRel(rec.date))}</div></div>` : ''}
         ${last ? `<div class="tile"><div class="label">Ultima volta</div><div class="value small-value">${esc(fmtDateRel(last.date))}</div><div class="hint num">${esc(setsText(last.sets))}</div></div>` : ''}
       </div>` : ''}
+      ${p.mode !== 'browse' && p.timer ? `
+      <div class="card picker-timer">
+        <label class="switch-row">
+          <span class="rest-label">${ICON.timer} Timer</span>
+          <input type="checkbox" role="switch" class="switch" data-pfield="timer-enabled" ${p.timer.enabled ? 'checked' : ''} aria-label="Timer per ${esc(e.name)}">
+        </label>
+        ${p.timer.enabled ? `
+        <label class="field timer-seconds"><span>Durata (secondi)</span>
+          <input type="text" inputmode="numeric" autocomplete="off" data-pfield="timer-seconds" value="${esc(p.timer.seconds)}"></label>` : ''}
+      </div>` : ''}
       ${p.mode !== 'browse' ? `<button type="button" class="btn primary big block" data-action="picker-add" data-id="${esc(e.id)}">Aggiungi</button>` : ''}
       ${custom ? `
       <div class="row">
@@ -1036,13 +1061,16 @@ function pickExercise(id) {
   const info = exerciseInfo(id);
   if (!info || !state.picker) return;
   const mode = state.picker.mode;
+  // Timer scelto nel dettaglio (assente se l'esercizio è stato appena creato: valori iniziali)
+  const timerChoice = state.picker.detail === id && state.picker.timer
+    ? { enabled: state.picker.timer.enabled, seconds: typedSeconds(state.picker.timer.seconds) } : null;
   closePicker();
   if (mode === 'plan' && state.editor) {
-    state.editor.exercises.push(editorExerciseFrom(info));
+    state.editor.exercises.push(editorExerciseFrom(info, timerChoice));
     render();
     [...document.querySelectorAll('#view-schede .ed-ex')].pop()?.scrollIntoView({ block: 'center' });
   } else if (mode === 'draft' && state.draft) {
-    addDraftExercise(info);
+    addDraftExercise(info, timerChoice);
     [...document.querySelectorAll('#view-oggi article.card')].pop()?.scrollIntoView({ block: 'start' });
   }
   toast(`Aggiunto: ${info.name}.`);
@@ -1558,6 +1586,12 @@ const ACTIONS = {
   'picker-detail': el => {
     state.picker.listScroll = $('#sheet').scrollTop;
     state.picker.detail = el.dataset.id;
+    // Valori iniziali del timer: dalla scheda (se l'esercizio è già in una scheda e stiamo
+    // aggiungendo all'allenamento), altrimenti acceso a 30 s solo per gli esercizi "a tempo".
+    const info = exerciseInfo(el.dataset.id);
+    const fromPlan = state.picker.mode === 'draft' ? state.plans.flatMap(p => p.exercises).find(e => e.exerciseId === el.dataset.id) : null;
+    const tm = defaultTimer(info, fromPlan);
+    state.picker.timer = { enabled: tm.enabled, seconds: String(tm.seconds) };
     renderSheet();
     $('#sheet').scrollTop = 0;
   },
@@ -1677,6 +1711,31 @@ document.addEventListener('input', e => {
     $('#picker-results').innerHTML = renderPickerResults();
     return;
   }
+  if (t.dataset.pfield && state.picker && state.picker.timer) {
+    if (t.dataset.pfield === 'timer-enabled') {
+      state.picker.timer.enabled = t.checked;
+      const top = $('#sheet').scrollTop;
+      renderSheet();                      // mostra/nasconde "Durata (secondi)"
+      $('#sheet').scrollTop = top;
+    } else state.picker.timer.seconds = t.value;
+    return;
+  }
+  if (t.dataset.dfield && state.draft) {
+    const i = +t.dataset.i;
+    const ex = state.draft.exercises[i];
+    const tm = Model.cleanTimer(ex.timer);
+    if (t.dataset.dfield === 'timer-enabled') {
+      ex.timer = { ...tm, enabled: t.checked };
+      // Spegnendo il timer, si ferma un eventuale conto alla rovescia di questo esercizio.
+      const run = state.draft.timer;
+      if (!t.checked && run && run.kind === 'set' && run.i === i) state.draft.timer = null;
+      saveDraft(); render(); updateTimer();
+    } else {
+      ex.timer = { ...tm, seconds: typedSeconds(t.value) };
+      saveDraft({ immediate: false });   // i pulsanti "Avvia timer" si aggiornano all'uscita dal campo
+    }
+    return;
+  }
   if (t.dataset.cfield && state.picker && state.picker.form) {
     state.picker.form[t.dataset.cfield] = t.type === 'checkbox' ? t.checked : t.value;
     return;
@@ -1699,6 +1758,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.dataset.field === 'progress-ex') { state.progress.exercise = t.value; render(); return; }
+  if (t.dataset.dfield === 'timer-seconds' && state.draft) { saveDraft(); render(); return; }
   if (t.dataset.field === 'picker-equip' && state.picker) {
     state.picker.equip = t.value;
     $('#picker-results').innerHTML = renderPickerResults();

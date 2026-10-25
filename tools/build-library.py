@@ -12,7 +12,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
-LIBRARY_VERSION = 1
+LIBRARY_VERSION = 2  # 2: aggiunto "dead-hang" (a tempo)
 OUT = Path(__file__).resolve().parent.parent / "data" / "esercizi.json"
 
 BODY_PARTS = ["Petto", "Schiena", "Spalle", "Bicipiti", "Tricipiti", "Quadricipiti",
@@ -494,6 +494,9 @@ ex("crunch-bicicletta", "Crunch a bicicletta", ["Bicycle crunch", "Bicicletta"],
 ex("flessioni-laterali-manubrio", "Flessioni laterali con manubrio", ["Side bend", "Piegamenti laterali"], CORE,
    ["Obliqui"], ["Quadrato dei lombi"], "manubri",
    "In piedi con un manubrio in una mano. Piegati di lato verso il peso e risali contraendo il fianco opposto, poi cambia lato.")
+ex("dead-hang", "Dead hang", ["Sospensione alla sbarra", "Appeso alla sbarra", "Hang"], CORE,
+   ["Avambracci", "Gran dorsale"], ["Spalle", "Trasverso dell'addome"], "corpo libero",
+   "Afferra la sbarra con le mani alla larghezza delle spalle e lasciati appendere a braccia tese, piedi staccati da terra. Tieni le spalle attive, senza farle salire alle orecchie, e resta appeso per il tempo previsto.", True)
 ex("l-sit", "L-sit", ["Squadra alle parallele"], CORE,
    ["Retto addominale", "Flessori dell'anca"], ["Tricipite", "Quadricipite"], "corpo libero",
    "Sulle parallele o a terra con le mani accanto ai fianchi, sollevati e tieni le gambe tese parallele al pavimento. Resta fermo per il tempo previsto.", True)

@@ -118,6 +118,8 @@ Limiti di iPhone da sapere:
 ## Timer per esercizi a tempo (plank, isometrie)
 
 - In **Schede**, per ogni esercizio, c'è l'interruttore **Timer** (spento di default). Se lo accendi compare **Durata (secondi)**.
+- Lo stesso interruttore c'è anche nel dettaglio del selettore (prima di **Aggiungi**), sia per le schede sia durante l'allenamento, e su ogni esercizio dell'allenamento in corso (**Timer esercizio**). Quest'ultimo vale solo per quell'allenamento e non modifica la scheda.
+- Gli esercizi della libreria segnati "a tempo" partono con il timer acceso a 30 secondi; tutti gli altri partono spenti, ma l'interruttore c'è sempre.
 - Durante l'allenamento, se il timer è acceso e la durata è maggiore di 0, ogni serie di quell'esercizio mostra **Avvia timer**. Con il timer spento o con durata 0 non compare nessun pulsante.
 - Alla fine del conto alla rovescia l'app suona, segna la serie come fatta e fa partire subito il recupero dell'esercizio.
 - **Ferma timer** interrompe il conto senza segnare la serie.
