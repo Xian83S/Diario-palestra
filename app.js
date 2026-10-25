@@ -72,6 +72,7 @@ const state = {
   library: null,          // libreria esercizi (data/esercizi.json) con indice per id
   customExercises: [],    // esercizi personalizzati dell'utente
   picker: null,           // selettore/libreria aperto: {mode, query, part, equip, detail, form}
+  noteEdit: null,         // indice dell'esercizio con la nota aperta in modifica (allenamento in corso)
   openSessions: new Set(),
   confirm: null,     // chiave del pulsante "armato" (eliminazione a due passaggi)
   lastBackup: null,
@@ -143,6 +144,15 @@ function lastPerformance(key) {
   return null;
 }
 
+/** Nota dell'ultima sessione con questo esercizio ('' se non c'è): si precompila nell'allenamento. */
+function lastNote(key) {
+  for (const s of sortedSessions()) {
+    const ex = s.exercises.find(e => exKey(e) === key);
+    if (ex) return Model.cleanNote(ex.note).trim();
+  }
+  return '';
+}
+
 /** Peso massimo mai sollevato in un esercizio (null se mai fatto), con la data. */
 function previousMax(key) {
   let max = null, date = null;
@@ -157,10 +167,12 @@ function previousMax(key) {
 function exerciseHistory(key) {
   const out = [];
   for (const s of [...sortedSessions()].reverse()) {
-    const sets = s.exercises.filter(e => exKey(e) === key).flatMap(e => e.sets);
+    const exs = s.exercises.filter(e => exKey(e) === key);
+    const sets = exs.flatMap(e => e.sets);
     if (!sets.length) continue;
     out.push({
       date: s.date, planName: s.planName, sets,
+      note: exs.map(e => String(e.note || '').trim()).filter(Boolean).join(' · '),
       max: Math.max(...sets.map(x => x.kg)),
       orm: Math.max(...sets.map(x => epley(x.kg, x.reps))),
       volume: setsVolume(sets),
@@ -267,6 +279,31 @@ function renderOggi() {
       </div>`}`;
 }
 
+/** Riga "Nota" di un esercizio dell'allenamento: chiusa (testo o "+ Aggiungi nota") o in modifica. */
+function noteBlock(ex, i) {
+  if (state.noteEdit === i) return `
+        <div class="note-edit" data-note-block="${i}">
+          <label class="note-label" for="note-${i}">Nota</label>
+          <textarea id="note-${i}" class="note-input" data-nfield="note" data-i="${i}" rows="3" maxlength="${Model.NOTE_MAX}"
+            placeholder="Es. sedile alla tacca 4, presa stretta…">${esc(ex.note || '')}</textarea>
+          <div class="note-actions">
+            <span class="muted note-count" id="note-count-${i}">${(ex.note || '').length}/${Model.NOTE_MAX}</span>
+            <button type="button" class="btn ghost small danger" data-action="note-clear" data-i="${i}">Cancella nota</button>
+          </div>
+        </div>`;
+  return `
+        <button type="button" class="note-line ${ex.note ? '' : 'empty'}" data-note-block="${i}" data-action="note-edit" data-i="${i}" aria-label="${ex.note ? `Nota: ${esc(ex.note)}. Tocca per modificare` : 'Aggiungi nota'}">
+          ${ex.note ? `<span class="note-label">Nota</span><span class="note-text">${esc(ex.note)}</span>` : '+ Aggiungi nota'}
+        </button>`;
+}
+
+/** Sostituisce solo la riga "Nota" (senza ridisegnare: il campo kg toccato resta attivo con la sua tastiera). */
+function refreshNoteBlock(i) {
+  const el = document.querySelector(`#view-oggi [data-note-block="${i}"]`);
+  const ex = state.draft && state.draft.exercises[i];
+  if (el && ex) el.outerHTML = noteBlock(ex, i); else render();
+}
+
 function renderDraft() {
   const d = state.draft;
   const total = d.exercises.reduce((n, ex) => n + ex.sets.length, 0);
@@ -298,6 +335,7 @@ function renderDraft() {
             ${armed(rmKey) ? 'Rimuovi?' : ICON.close}
           </button>
         </div>
+        ${noteBlock(ex, i)}
         <p class="last">${last
           ? `Ultima volta: <strong>${esc(fmtDateRel(last.date))}</strong>, <span class="num">${esc(setsText(last.sets))}</span>`
           : 'Prima volta per questo esercizio'}</p>
@@ -438,6 +476,7 @@ function startWorkout(planId) {
     exercises: plan ? plan.exercises.map(ex => ({
       ...(ex.exerciseId ? { exerciseId: ex.exerciseId } : {}),
       name: ex.name,
+      note: lastNote(exKey(ex)),
       rest: restOf(ex),
       timer: Model.cleanTimer(ex.timer),
       sets: planSetsToDraft(ex.sets),
@@ -471,6 +510,7 @@ function repeatWorkout(planId) {
       return {
         ...(ex.exerciseId ? { exerciseId: ex.exerciseId } : {}),
         name: ex.name,
+        note: lastNote(exKey(ex)),
         rest: restOf(pe),
         timer: Model.cleanTimer(pe && pe.timer),
         sets: ex.sets.map(set => ({ kg: fmtKgInput(set.kg), reps: String(set.reps), done: false })),
@@ -490,7 +530,7 @@ function addDraftExercise(info, timerChoice) {
   else if (fromPlan) sets = planSetsToDraft(fromPlan.sets);
   else sets = Array.from({ length: 3 }, () => ({ kg: '', reps: info.timed ? '1' : '', done: false }));
   const timer = timerChoice ? Model.cleanTimer(timerChoice) : defaultTimer(info, fromPlan);
-  state.draft.exercises.push({ exerciseId: info.id, name: info.name, rest: restOf(fromPlan), timer, sets });
+  state.draft.exercises.push({ exerciseId: info.id, name: info.name, note: lastNote(key), rest: restOf(fromPlan), timer, sets });
   saveDraft();
   render();
 }
@@ -508,6 +548,7 @@ async function finishWorkout() {
     .map(ex => ({
       ...(ex.exerciseId ? { exerciseId: ex.exerciseId } : {}),
       name: ex.name.trim(),
+      note: Model.cleanNote(ex.note).trim(),
       sets: ex.sets.filter(s => s.done)
         .map(s => ({ kg: toNum(s.kg), reps: Math.round(toNum(s.reps)) }))
         .filter(s => s.kg >= 0 && s.reps >= 1),
@@ -1177,7 +1218,7 @@ function renderExerciseProgress() {
     <article class="card list">
       ${[...hist].reverse().slice(0, 5).map(h => `
         <div class="list-item">
-          <div class="main"><strong>${esc(fmtDateRel(h.date))}</strong> <span class="muted">· ${esc(h.planName)}</span>
+          <div class="main"><strong>${esc(fmtDateRel(h.date))}</strong>${h.note ? ` <span class="hist-note">${esc(h.note)}</span>` : ''} <span class="muted">· ${esc(h.planName)}</span>
             <div class="sets-txt num">${esc(setsText(h.sets))}</div></div>
           <div class="right">${fmt(h[metric.key], metric.key === 'volume' ? 0 : 1)} <small class="muted">kg</small></div>
         </div>`).join('')}
@@ -1369,8 +1410,9 @@ function renderStorico() {
               <table class="sets-table">
                 <thead><tr><th>Esercizio</th><th>Serie (kg×rip)</th><th style="text-align:right">Max</th></tr></thead>
                 <tbody>${s.exercises.map(ex => `
-                  <tr><td>${esc(ex.name)}</td><td class="sets-col num">${esc(setsText(ex.sets))}</td>
-                  <td class="num">${fmt(Math.max(...ex.sets.map(x => x.kg)), 2)}</td></tr>`).join('')}</tbody>
+                  <tr${ex.note ? ' class="has-note"' : ''}><td>${esc(ex.name)}</td><td class="sets-col num">${esc(setsText(ex.sets))}</td>
+                  <td class="num">${fmt(Math.max(...ex.sets.map(x => x.kg)), 2)}</td></tr>
+                  ${ex.note ? `<tr class="note-row"><td colspan="3">${esc(ex.note)}</td></tr>` : ''}`).join('')}</tbody>
               </table>
             </div>
             <button type="button" class="btn small danger ${armed(delKey) ? 'armed' : ''}" data-action="sess-delete" data-id="${esc(s.id)}">
@@ -1461,6 +1503,7 @@ function cleanSession(s) {
     .map(ex => ({
       ...(ex.exerciseId ? { exerciseId: String(ex.exerciseId) } : {}),
       name: String(ex.name).trim(),
+      note: Model.cleanNote(ex.note),
       sets: ex.sets.map(x => ({ kg: toNum(x && x.kg), reps: Math.round(toNum(x && x.reps)) })).filter(x => x.kg >= 0 && x.reps >= 1),
     }))
     .filter(ex => ex.sets.length);
@@ -1595,6 +1638,7 @@ const ACTIONS = {
     const ex = state.draft.exercises[i];
     if (ex.sets.some(s => s.done) && !confirmTwice(`ex-${i}`)) return;
     shiftTimerAfterRemoval(i);
+    state.noteEdit = null;
     state.draft.exercises.splice(i, 1);
     state.confirm = null;
     saveDraft(); render(); updateTimer();
@@ -1609,6 +1653,20 @@ const ACTIONS = {
     state.draft = null;
     saveDraft(); render(); updateTimer();
     toast('Allenamento annullato.');
+  },
+  'note-edit': el => {
+    const prev = state.noteEdit;
+    state.noteEdit = +el.dataset.i;
+    if (prev !== null && prev !== state.noteEdit) refreshNoteBlock(prev);
+    refreshNoteBlock(state.noteEdit);
+    const ta = document.getElementById(`note-${el.dataset.i}`);
+    if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+  },
+  'note-clear': el => {
+    clearTimeout(noteBlurTimer);
+    state.draft.exercises[+el.dataset.i].note = '';
+    state.noteEdit = null;
+    saveDraft(); refreshNoteBlock(+el.dataset.i);
   },
   'summary-close': () => { state.summary = null; render(); },
 
@@ -1752,6 +1810,15 @@ document.addEventListener('input', e => {
     if (t.value) { state.draft.date = t.value; saveDraft(); }
     return;
   }
+  // Nota dell'esercizio: salvata mentre si scrive (la bozza sopravvive alla chiusura)
+  if (t.dataset.nfield === 'note' && state.draft) {
+    const ex = state.draft.exercises[+t.dataset.i];
+    ex.note = Model.cleanNote(t.value);
+    const count = document.getElementById(`note-count-${t.dataset.i}`);
+    if (count) count.textContent = `${ex.note.length}/${Model.NOTE_MAX}`;
+    saveDraft({ immediate: false });
+    return;
+  }
   // Selettore esercizi: aggiorno solo l'elenco, così il campo di ricerca resta attivo
   if (t.dataset.field === 'picker-query' && state.picker) {
     state.picker.query = t.value;
@@ -1852,6 +1919,24 @@ document.addEventListener('submit', e => {
     e.preventDefault();
     safely(saveEditor);
   }
+});
+
+// Uscita dal campo nota: si salva e si richiude. Il breve ritardo lascia arrivare il tocco
+// su "Cancella nota", che altrimenti sparirebbe col ridisegno.
+let noteBlurTimer;
+document.addEventListener('focusout', e => {
+  const t = e.target;
+  if (!t.dataset || t.dataset.nfield !== 'note' || !state.draft) return;
+  const i = +t.dataset.i;
+  clearTimeout(noteBlurTimer);
+  noteBlurTimer = setTimeout(() => {
+    if (state.noteEdit !== i || !state.draft) return;
+    const ex = state.draft.exercises[i];
+    if (ex) ex.note = Model.cleanNote(ex.note).trim();
+    state.noteEdit = null;
+    saveDraft();
+    refreshNoteBlock(i);
+  }, 150);
 });
 
 // Peso al momento in cui si entra nel campo kg: serve per la copia alle serie successive.

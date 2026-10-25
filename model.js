@@ -18,11 +18,14 @@
  *       "custom-…") più `name`, copia del nome al momento. Nuova raccolta
  *       `customExercises` per gli esercizi personalizzati. La migrazione
  *       (linkExercises) aggiunge solo gli id: nomi, serie e date restano uguali.
+ *   7 — ogni esercizio di sessioni e bozza ha `note` (testo, massimo 500 caratteri;
+ *       vuota per i dati vecchi). Migrazione: migrateV7.
  * Tutti i campi mancanti vengono completati con i valori predefiniti.
  * Le sessioni registrate non cambiano tra le versioni.
  */
 const Model = (() => {
-  const DATA_VERSION = 6;
+  const DATA_VERSION = 7;
+  const NOTE_MAX = 500;
   const DEFAULT_REPS = 10;
   const DEFAULT_SETS = 3;
   const REST = { default: 90, min: 15, max: 600, step: 15 }; // secondi
@@ -239,7 +242,25 @@ const Model = (() => {
     };
   }
 
+  /** Nota di un esercizio: testo libero (accapo compresi), massimo 500 caratteri. */
+  const cleanNote = v => String(v ?? '').slice(0, NOTE_MAX);
+
+  /**
+   * v7: completa i campi nuovi senza toccare il resto. Idempotente.
+   * - sessioni e bozza: `note` ('' se manca)
+   */
+  function migrateV7({ plans = [], sessions = [], draft = null, customExercises = [] }) {
+    const withNote = ex => (ex && typeof ex.note === 'string') ? ex : { ...ex, note: cleanNote(ex && ex.note) };
+    return {
+      plans,
+      sessions: sessions.map(s => ({ ...s, exercises: (s.exercises || []).map(withNote) })),
+      draft: draft && Array.isArray(draft.exercises) ? { ...draft, exercises: draft.exercises.map(withNote) } : draft,
+      customExercises,
+    };
+  }
+
   return {
+    NOTE_MAX, cleanNote, migrateV7,
     DATA_VERSION, REST, TIMER, BODY_WEIGHT, WEIGHT_STEPS, DEFAULT_SETTINGS, cleanSettings,
     BODY_PARTS, EQUIPMENT, norm, fold, isCustomId, cleanCustomExercise, cleanCustomExercises, linkExercises,
     cleanRest, cleanTimer, migratePlan, migratePlans, migratePlanExercise,

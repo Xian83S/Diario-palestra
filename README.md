@@ -85,6 +85,14 @@ Il codice è già su GitHub, quindi questa è la strada più breve. L'indirizzo 
 3. Esegui `python3 tools/build-library.py`. Lo script controlla che id e alias siano unici, che parti del corpo e attrezzi siano tra quelli ammessi e che le istruzioni abbiano 2-3 frasi, poi riscrive `data/esercizi.json`.
 4. Aumenta `VERSION` in `sw.js`.
 
+## Note per esercizio
+
+- Durante l'allenamento, sotto il nome di ogni esercizio c'è la riga **Nota**: "+ Aggiungi nota" se è vuota, altrimenti il testo (al massimo 2 righe a vista).
+- Un tocco apre un campo su più righe, che si salva da solo quando esci. "Cancella nota" la svuota.
+- Toccando un campo kg o ripetizioni la nota si chiude e la tastiera numerica resta.
+- La nota si ripropone la volta dopo per lo stesso esercizio: avviando la scheda, con "Ripeti ultimo" e con "Aggiungi esercizio".
+- La nota compare nello **Storico**, sotto l'esercizio, e in **Progressi → Ultime sessioni**, accanto alla data. È inclusa nei backup; quelli vecchi si importano con la nota vuota.
+
 ## Copia del peso alle serie successive
 
 - Durante l'allenamento, quando cambi i kg di una serie, le serie successive **non ancora fatte** che avevano lo stesso peso di prima prendono il nuovo valore. Quelle con un peso diverso (piramidi, riscaldamento) non cambiano.
@@ -158,6 +166,7 @@ Il formato dei dati ha un numero di versione (`Model.DATA_VERSION` in `model.js`
 - **Versione 1:** ogni esercizio di una scheda aveva `sets`, `reps` e `weight` unici (es. 4 serie da 8 a 60 kg).
 - **Versione 2:** ogni serie ha le proprie ripetizioni e il proprio peso: `sets: [{reps: 10, weight: 55}, {reps: 8, weight: 60}, …]`, più il recupero `rest` in secondi.
 - **Versione 3:** ogni esercizio ha anche `timer: {enabled, seconds}` per gli esercizi a tempo. Per le schede esistenti vale `{enabled: false, seconds: 30}`.
+- **Versione 7:** ogni esercizio delle sessioni (e dell'allenamento in corso) ha `note`, al massimo 500 caratteri; i dati vecchi hanno nota vuota. Prima della conversione si salva una copia delle sessioni (`diarioPalestra.sessions.v6`).
 - **Versione 6:** ogni esercizio di schede e sessioni ha `exerciseId` (id della libreria oppure `custom-…`) più `name`, cioè il nome al momento. Nuova raccolta `customExercises` per gli esercizi personalizzati. Vedi "Libreria esercizi" più sotto.
 - **Versione 5:** impostazioni `settings: {weightStep}`, cioè il passo dei pulsanti − e + dei kg (1, 2,5 o 5; predefinito 2,5). Sono incluse nei backup.
 - **Versione 4:** nuova raccolta `bodyWeights` per il peso corporeo, `[{id, date, kg, createdAt}]`, con al massimo una registrazione per data. Viene inclusa nei backup.
