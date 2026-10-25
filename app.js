@@ -369,6 +369,44 @@ function renderSummary() {
     <button type="button" class="btn primary big block" data-action="summary-close">Chiudi</button>`;
 }
 
+/* ---------- Copia automatica del peso alle serie successive ---------- */
+/** Stesso peso? Vuoto = vuoto; "62,5" = "62.5"; confronto al centesimo. */
+function sameKg(a, b) {
+  const ea = String(a ?? '').trim() === '', eb = String(b ?? '').trim() === '';
+  if (ea || eb) return ea && eb;
+  const x = toNum(a), y = toNum(b);
+  return Number.isFinite(x) && Number.isFinite(y) && Math.round(x * 100) === Math.round(y * 100);
+}
+
+/**
+ * Il peso della serie j è passato da oldKg a newKg: lo copio nelle serie successive
+ * ancora da fare che avevano lo stesso vecchio peso (piramidi e riscaldamento restano).
+ * Solo l'allenamento in corso; restituisce gli indici delle serie cambiate.
+ */
+function copyKgForward(i, j, oldKg, newKg) {
+  const ex = state.draft && state.draft.exercises[i];
+  if (!ex || !state.settings.copyWeight || sameKg(oldKg, newKg) || !Number.isFinite(toNum(newKg))) return [];
+  const changed = [];
+  for (let k = j + 1; k < ex.sets.length; k++) {
+    const set = ex.sets[k];
+    if (!set.done && sameKg(set.kg, oldKg)) { set.kg = newKg; changed.push(k); }
+  }
+  return changed;
+}
+
+/** Aggiorna i campi delle serie copiate e le fa lampeggiare (mezzo secondo). */
+function showCopiedKg(i, changed) {
+  for (const k of changed) {
+    const input = document.querySelector(`#view-oggi .set-row[data-i="${i}"][data-j="${k}"] [data-field="kg"]`);
+    if (!input) continue;
+    input.value = state.draft.exercises[i].sets[k].kg;
+    input.classList.remove('kg-flash');
+    void input.offsetWidth;            // riavvia l'animazione se già in corso
+    input.classList.add('kg-flash');
+    setTimeout(() => input.classList.remove('kg-flash'), 600);
+  }
+}
+
 /** Serie previste di una scheda -> serie dell'allenamento in corso (stringhe, non fatte). */
 function planSetsToDraft(sets) {
   return sets.map(s => ({ kg: fmtKgInput(s.weight), reps: s.reps ? String(s.reps) : '', done: false }));
@@ -1361,6 +1399,11 @@ function renderStorico() {
           ${Model.WEIGHT_STEPS.map(v => `<button type="button" data-action="weight-step" data-step="${v}" aria-pressed="${v === state.settings.weightStep}">${fmt(v, 2)}</button>`).join('')}
         </div>
       </div>
+      <label class="switch-row setting-switch">
+        <span><strong>Copia il peso alle serie successive</strong>
+          <span class="muted setting-hint">Cambiando i kg di una serie, le serie seguenti non ancora fatte con lo stesso peso si aggiornano.</span></span>
+        <input type="checkbox" role="switch" class="switch" data-sfield="copyWeight" ${state.settings.copyWeight ? 'checked' : ''}>
+      </label>
     </article>
     <h2 class="section-title">Backup</h2>
     <article class="card backup">
@@ -1511,8 +1554,12 @@ const ACTIONS = {
     const set = state.draft.exercises[+row.dataset.i].sets[+row.dataset.j];
     const cur = toNum(set.kg);
     const base = Number.isFinite(cur) && cur > 0 ? cur : 0;
+    const oldKg = set.kg;
     set.kg = fmtKgInput(Math.max(0, base + Number(el.dataset.dir) * state.settings.weightStep));
-    row.querySelector('[data-field="kg"]').value = set.kg;
+    const input = row.querySelector('[data-field="kg"]');
+    input.value = set.kg;
+    input.dataset.orig = set.kg;
+    showCopiedKg(+row.dataset.i, copyKgForward(+row.dataset.i, +row.dataset.j, oldKg, set.kg));
     saveDraft();
   },
   'weight-step': async el => {
@@ -1740,6 +1787,12 @@ document.addEventListener('input', e => {
     state.picker.form[t.dataset.cfield] = t.type === 'checkbox' ? t.checked : t.value;
     return;
   }
+  if (t.dataset.sfield === 'copyWeight') {
+    state.settings = Model.cleanSettings({ ...state.settings, copyWeight: t.checked });
+    safely(() => Store.saveSettings(state.settings));
+    toast(t.checked ? 'Copia del peso attiva.' : 'Copia del peso disattivata.');
+    return;
+  }
   // Peso corporeo: il valore resta tra un ridisegno e l'altro
   if (t.dataset.bfield === 'kg') { state.bodyForm.kg = t.value; return; }
   // Editor della scheda
@@ -1766,12 +1819,16 @@ document.addEventListener('change', e => {
   }
   if (t.dataset.field === 'kg' && state.draft) {
     const row = t.closest('.set-row');
+    if (!row) return;
     const n = toNum(t.value);
-    if (row && Number.isFinite(n) && n >= 0) {
+    if (Number.isFinite(n) && n >= 0) {
       t.value = fmtKgInput(n);
       state.draft.exercises[+row.dataset.i].sets[+row.dataset.j].kg = t.value;
-      saveDraft();
     }
+    // Copia alle serie successive confrontando con il peso che c'era quando si è entrati nel campo.
+    if (t.dataset.orig !== undefined) showCopiedKg(+row.dataset.i, copyKgForward(+row.dataset.i, +row.dataset.j, t.dataset.orig, t.value));
+    t.dataset.orig = t.value;
+    saveDraft();
     return;
   }
   if (t.dataset.bfield === 'date') { state.bodyForm.date = t.value; render(); return; } // aggiorna "Salva/Aggiorna" 
@@ -1795,6 +1852,12 @@ document.addEventListener('submit', e => {
     e.preventDefault();
     safely(saveEditor);
   }
+});
+
+// Peso al momento in cui si entra nel campo kg: serve per la copia alle serie successive.
+document.addEventListener('focusin', e => {
+  const t = e.target;
+  if (t.dataset && t.dataset.field === 'kg' && t.closest('#view-oggi .set-row')) t.dataset.orig = t.value;
 });
 
 // Esc chiude il selettore (tastiera esterna).

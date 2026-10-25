@@ -85,6 +85,14 @@ Il codice è già su GitHub, quindi questa è la strada più breve. L'indirizzo 
 3. Esegui `python3 tools/build-library.py`. Lo script controlla che id e alias siano unici, che parti del corpo e attrezzi siano tra quelli ammessi e che le istruzioni abbiano 2-3 frasi, poi riscrive `data/esercizi.json`.
 4. Aumenta `VERSION` in `sw.js`.
 
+## Copia del peso alle serie successive
+
+- Durante l'allenamento, quando cambi i kg di una serie, le serie successive **non ancora fatte** che avevano lo stesso peso di prima prendono il nuovo valore. Quelle con un peso diverso (piramidi, riscaldamento) non cambiano.
+- Cambia solo il peso, mai le ripetizioni. Con − e + la copia è immediata. Scrivendo a mano avviene quando esci dal campo o premi invio.
+- Riguarda solo l'allenamento in corso, non la scheda né lo storico.
+- Le serie aggiornate lampeggiano per mezzo secondo (senza animazione se il telefono è impostato su "Riduci movimento").
+- Si disattiva in **Storico → Impostazioni → Copia il peso alle serie successive** (acceso di default). L'impostazione è inclusa nel backup.
+
 ## Ripeti ultimo allenamento
 
 - In **Oggi** ogni scheda ha due pulsanti:

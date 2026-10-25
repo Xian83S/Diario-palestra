@@ -29,7 +29,7 @@ const Model = (() => {
   const TIMER = { seconds: 30, max: 3600 };                   // secondi
   const BODY_WEIGHT = { min: 20, max: 400 };                  // kg accettati
   const WEIGHT_STEPS = [1, 2.5, 5];                           // passo dei pulsanti −/+ (kg)
-  const DEFAULT_SETTINGS = { weightStep: 2.5 };
+  const DEFAULT_SETTINGS = { weightStep: 2.5, copyWeight: true };
   const BODY_PARTS = ['Petto', 'Schiena', 'Spalle', 'Bicipiti', 'Tricipiti', 'Quadricipiti',
     'Femorali', 'Glutei', 'Polpacci', 'Core', 'Corpo intero/Cardio'];
   const EQUIPMENT = ['bilanciere', 'manubri', 'macchina', 'cavi', 'corpo libero', 'kettlebell', 'elastici', 'altro'];
@@ -123,7 +123,10 @@ const Model = (() => {
   function cleanSettings(s) {
     const obj = s && typeof s === 'object' ? s : {};
     const step = num(obj.weightStep);
-    return { weightStep: WEIGHT_STEPS.includes(step) ? step : DEFAULT_SETTINGS.weightStep };
+    return {
+      weightStep: WEIGHT_STEPS.includes(step) ? step : DEFAULT_SETTINGS.weightStep,
+      copyWeight: obj.copyWeight !== false,   // "Copia il peso alle serie successive" (acceso se assente)
+    };
   }
 
   const cleanList = v => (Array.isArray(v) ? v : String(v ?? '').split(','))

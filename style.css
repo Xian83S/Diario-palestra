@@ -534,3 +534,14 @@ textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent
 /* ---------- Timer per esercizio: selettore e allenamento in corso ---------- */
 .picker-timer { display: flex; flex-direction: column; gap: 8px; }
 .ex-timer-row { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+
+/* ---------- Copia del peso: lampeggio delle serie aggiornate ---------- */
+@keyframes kg-flash { 0% { background: var(--accent); color: var(--accent-ink); } 100% { background: var(--surface-2); } }
+.set-row input.kg-flash { animation: kg-flash .5s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  /* niente animazione: evidenziazione fissa per lo stesso mezzo secondo */
+  .set-row input.kg-flash { animation: none; background: var(--accent-soft); border-color: var(--accent); }
+}
+.setting-switch { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; align-items: center; }
+.setting-switch > span { display: flex; flex-direction: column; gap: 2px; }
+.setting-hint { font-size: 0.9rem; }
