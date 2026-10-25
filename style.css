@@ -566,3 +566,28 @@ textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent
 table.sets-table tr.has-note td { border-bottom: 0; }
 table.sets-table tr.note-row td { border-top: 0; padding-top: 0; font-size: 0.85rem; color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; }
 .hist-note { color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+
+/* ---------- Cardio: blocchi su due righe (durata · Avvia · fatto / velocità · pendenza) ---------- */
+.cardio-block {
+  display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto 48px;
+  gap: 8px; align-items: end; border-radius: 10px; padding: 4px;
+}
+.cardio-block + .cardio-block { border-top: 1px solid var(--border); padding-top: 10px; }
+.cardio-block .set-n { font-family: var(--font-display); font-weight: 600; font-size: 1.2rem; text-align: center; color: var(--muted); line-height: 44px; }
+.cardio-block.done { background: var(--done-bg); }
+.cardio-block.done .check { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.cardio-block.done input { border-color: transparent; background: transparent; }
+.cardio-block.done .step-btn { background: transparent; }
+.cardio-block input { text-align: center; font-family: var(--font-display); font-size: 1.25rem; font-weight: 600; padding: 6px 4px; min-width: 0; }
+.cb-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cb-field > span { font-size: 0.8rem; color: var(--muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cardio-block .cb-start { grid-column: auto; margin-bottom: 0; padding: 0 10px; white-space: nowrap; }
+.cb-steps { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.cb-step-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; gap: 4px; }
+.cardio-total { margin: 10px 0 0; font-weight: 600; }
+.cardio-total .num { font-family: var(--font-display); font-size: 1.1rem; }
+.cardio-est { font-size: 0.8rem; margin: 2px 0 0; }
+.summary-cardio { margin-top: 10px; }
+/* Editor: # | min | km/h | % | elimina; "Copia dal precedente" sotto */
+.ed-block-row { grid-template-columns: 2rem repeat(3, minmax(0, 1fr)) 44px; }
+.ed-block-row .ed-copy { grid-column: 2 / -1; justify-self: start; min-height: 32px; padding: 2px 8px; font-size: 0.85rem; }

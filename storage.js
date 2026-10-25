@@ -87,12 +87,14 @@ const Store = (() => {
         }
         target = Model.DATA_VERSION;
       }
-      // v7: note per esercizio (non serve la libreria). Copia di sicurezza prima di convertire.
+      // v7: note per esercizio e tipo (forza/cardio; i dati vecchi sono tutti di forza).
+      // Non serve la libreria. Copia di sicurezza prima di convertire.
       if (version < 7) {
         if (sessions.length) copy(KEYS.sessionsCopy(version), sessions);
         ({ plans, sessions, draft, customExercises } = Model.migrateV7({ plans, sessions, draft, customExercises }));
         write(KEYS.sessions, sessions);
         if (draft) write(KEYS.draft, draft);
+        if (customExercises.length) write(KEYS.customExercises, customExercises);
         if (version >= 6) target = Model.DATA_VERSION; // già collegati alla libreria
       }
       if (version < target) {
