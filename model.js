@@ -18,18 +18,35 @@
  *       "custom-…") più `name`, copia del nome al momento. Nuova raccolta
  *       `customExercises` per gli esercizi personalizzati. La migrazione
  *       (linkExercises) aggiunge solo gli id: nomi, serie e date restano uguali.
+ *   7 — ogni esercizio di sessioni e bozza ha `note` (testo, massimo 500 caratteri;
+ *       vuota per i dati vecchi) e ogni esercizio di schede, sessioni, bozza e
+ *       personalizzati ha `type`: "strength" (predefinito, tutti i dati vecchi) o
+ *       "cardio". Per il cardio ogni "serie" è un blocco
+ *       {minutes, speedKmh, inclinePct} (+ `done` nella bozza e nelle sessioni).
+ *       Migrazione: migrateV7.
  * Tutti i campi mancanti vengono completati con i valori predefiniti.
  * Le sessioni registrate non cambiano tra le versioni.
  */
 const Model = (() => {
-  const DATA_VERSION = 6;
+  const DATA_VERSION = 7;
+  const NOTE_MAX = 500;
   const DEFAULT_REPS = 10;
   const DEFAULT_SETS = 3;
   const REST = { default: 90, min: 15, max: 600, step: 15 }; // secondi
   const TIMER = { seconds: 30, max: 3600 };                   // secondi
   const BODY_WEIGHT = { min: 20, max: 400 };                  // kg accettati
   const WEIGHT_STEPS = [1, 2.5, 5];                           // passo dei pulsanti −/+ (kg)
-  const DEFAULT_SETTINGS = { weightStep: 2.5 };
+  const SPEED_STEPS = [0.1, 0.5];                             // passo dei pulsanti −/+ della velocità (km/h)
+  const INCLINE_STEPS = [0.5, 1];                             // passo dei pulsanti −/+ della pendenza (%)
+  const DEFAULT_SETTINGS = { weightStep: 2.5, copyWeight: true, speedStep: 0.5, inclineStep: 0.5 };
+  const TYPES = ['strength', 'cardio'];
+  /** Campi possibili di un blocco cardio. Ogni macchina ne usa un elenco (cardioFields). */
+  const CARDIO_FIELDS = {
+    minutes: { label: 'Durata', unit: 'min', min: 0, max: 600, positive: true },
+    speedKmh: { label: 'Velocità', unit: 'km/h', min: 0, max: 30 },
+    inclinePct: { label: 'Pendenza', unit: '%', min: 0, max: 30 },
+  };
+  const TREADMILL_FIELDS = ['minutes', 'speedKmh', 'inclinePct']; // per ora l'unica macchina
   const BODY_PARTS = ['Petto', 'Schiena', 'Spalle', 'Bicipiti', 'Tricipiti', 'Quadricipiti',
     'Femorali', 'Glutei', 'Polpacci', 'Core', 'Corpo intero/Cardio'];
   const EQUIPMENT = ['bilanciere', 'manubri', 'macchina', 'cavi', 'corpo libero', 'kettlebell', 'elastici', 'altro'];
@@ -60,11 +77,35 @@ const Model = (() => {
   };
   const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
+  const typeOf = x => (x && x.type === 'cardio') ? 'cardio' : 'strength';
+  const round2 = n => Math.round(n * 100) / 100;
+
+  /**
+   * Blocco cardio valido o null: durata > 0 (anche decimale), velocità e pendenza 0…30
+   * (se mancano valgono 0). Con keepDone conserva `done`.
+   */
+  function cleanCardioBlock(b, keepDone = false) {
+    if (!b || typeof b !== 'object') return null;
+    const minutes = num(b.minutes);
+    if (!(minutes > 0)) return null;
+    const lim = (v, f) => { const n = num(v); return Number.isFinite(n) ? round2(Math.min(f.max, Math.max(f.min, n))) : 0; };
+    return {
+      minutes: round2(Math.min(CARDIO_FIELDS.minutes.max, minutes)),
+      speedKmh: lim(b.speedKmh, CARDIO_FIELDS.speedKmh),
+      inclinePct: lim(b.inclinePct, CARDIO_FIELDS.inclinePct),
+      ...(keepDone ? { done: b.done === true } : {}),
+    };
+  }
+
   /** Porta un esercizio di scheda (v1, v2 o v3) al formato attuale. Restituisce null se non valido. */
   function migratePlanExercise(ex) {
     if (!ex || typeof ex !== 'object' || !String(ex.name ?? '').trim()) return null;
     let sets;
-    if (Array.isArray(ex.sets)) {
+    if (typeOf(ex) === 'cardio') {
+      // cardio: blocchi previsti {minutes, speedKmh, inclinePct}
+      sets = (Array.isArray(ex.sets) ? ex.sets : []).map(b => cleanCardioBlock(b)).filter(Boolean);
+      if (!sets.length) sets = [{ minutes: 30, speedKmh: 0, inclinePct: 0 }];
+    } else if (Array.isArray(ex.sets)) {
       // v2: lista di serie
       sets = ex.sets.filter(s => s && typeof s === 'object').map(s => ({ reps: cleanReps(s.reps), weight: cleanWeight(s.weight) }));
     } else {
@@ -78,7 +119,7 @@ const Model = (() => {
     return {
       id: String(ex.id || newId()),
       ...(ex.exerciseId ? { exerciseId: String(ex.exerciseId) } : {}),
-      name: String(ex.name).trim(), sets, rest: cleanRest(ex.rest), timer: cleanTimer(ex.timer),
+      name: String(ex.name).trim(), type: typeOf(ex), sets, rest: cleanRest(ex.rest), timer: cleanTimer(ex.timer),
     };
   }
 
@@ -122,8 +163,13 @@ const Model = (() => {
   /** Impostazioni: valori non ammessi tornano al predefinito. */
   function cleanSettings(s) {
     const obj = s && typeof s === 'object' ? s : {};
-    const step = num(obj.weightStep);
-    return { weightStep: WEIGHT_STEPS.includes(step) ? step : DEFAULT_SETTINGS.weightStep };
+    const step = num(obj.weightStep), speed = num(obj.speedStep), incline = num(obj.inclineStep);
+    return {
+      weightStep: WEIGHT_STEPS.includes(step) ? step : DEFAULT_SETTINGS.weightStep,
+      copyWeight: obj.copyWeight !== false,   // "Copia il peso alle serie successive" (acceso se assente)
+      speedStep: SPEED_STEPS.includes(speed) ? speed : DEFAULT_SETTINGS.speedStep,
+      inclineStep: INCLINE_STEPS.includes(incline) ? incline : DEFAULT_SETTINGS.inclineStep,
+    };
   }
 
   const cleanList = v => (Array.isArray(v) ? v : String(v ?? '').split(','))
@@ -155,6 +201,8 @@ const Model = (() => {
       equipment: EQUIPMENT.includes(c.equipment) ? c.equipment : 'altro',
       instructions: String(c.instructions ?? '').trim().slice(0, 1000),
       timed: c.timed === true,
+      type: typeOf(c),
+      ...(typeOf(c) === 'cardio' ? { cardioFields: TREADMILL_FIELDS.slice() } : {}),
       createdAt: c.createdAt ? String(c.createdAt) : new Date().toISOString(),
     };
   }
@@ -236,7 +284,29 @@ const Model = (() => {
     };
   }
 
+  /** Nota di un esercizio: testo libero (accapo compresi), massimo 500 caratteri. */
+  const cleanNote = v => String(v ?? '').slice(0, NOTE_MAX);
+
+  /**
+   * v7: completa i campi nuovi senza toccare il resto. Idempotente.
+   * - sessioni e bozza: `note` ('' se manca)
+   * - schede, sessioni, bozza, personalizzati: `type` ("strength" se manca: i dati vecchi sono tutti di forza)
+   */
+  function migrateV7({ plans = [], sessions = [], draft = null, customExercises = [] }) {
+    const withType = ex => (ex && TYPES.includes(ex.type)) ? ex : { ...ex, type: 'strength' };
+    const withNote = ex => (ex && typeof ex.note === 'string') ? ex : { ...ex, note: cleanNote(ex && ex.note) };
+    const both = ex => withType(withNote(ex));
+    return {
+      plans: plans.map(p => ({ ...p, exercises: p.exercises.map(withType) })),
+      sessions: sessions.map(s => ({ ...s, exercises: (s.exercises || []).map(both) })),
+      draft: draft && Array.isArray(draft.exercises) ? { ...draft, exercises: draft.exercises.map(both) } : draft,
+      customExercises: customExercises.map(withType),
+    };
+  }
+
   return {
+    NOTE_MAX, cleanNote, migrateV7,
+    TYPES, CARDIO_FIELDS, TREADMILL_FIELDS, SPEED_STEPS, INCLINE_STEPS, typeOf, cleanCardioBlock,
     DATA_VERSION, REST, TIMER, BODY_WEIGHT, WEIGHT_STEPS, DEFAULT_SETTINGS, cleanSettings,
     BODY_PARTS, EQUIPMENT, norm, fold, isCustomId, cleanCustomExercise, cleanCustomExercises, linkExercises,
     cleanRest, cleanTimer, migratePlan, migratePlans, migratePlanExercise,

@@ -12,18 +12,24 @@ import sys
 import unicodedata
 from pathlib import Path
 
-LIBRARY_VERSION = 1
+LIBRARY_VERSION = 3  # 2: "dead-hang"; 3: tipo (forza/cardio) e tapis roulant cardio
 OUT = Path(__file__).resolve().parent.parent / "data" / "esercizi.json"
 
 BODY_PARTS = ["Petto", "Schiena", "Spalle", "Bicipiti", "Tricipiti", "Quadricipiti",
               "Femorali", "Glutei", "Polpacci", "Core", "Corpo intero/Cardio"]
 EQUIPMENT = ["bilanciere", "manubri", "macchina", "cavi", "corpo libero", "kettlebell", "elastici", "altro"]
+TYPES = ["strength", "cardio"]
+# Campi di un blocco cardio, per macchina. Per ora solo il tapis roulant.
+CARDIO_FIELDS = {"tapis roulant": ["minutes", "speedKmh", "inclinePct"]}
 
 # (id, nome, alias, parte, muscoli principali, secondari, attrezzo, istruzioni[, a tempo])
 E = []
-def ex(id_, name, aliases, part, muscles, secondary, equipment, instructions, timed=False):
-    E.append(dict(id=id_, name=name, aliases=aliases, bodyPart=part, muscles=muscles,
-                  secondary=secondary, equipment=equipment, instructions=instructions, timed=timed))
+def ex(id_, name, aliases, part, muscles, secondary, equipment, instructions, timed=False, type_="strength", cardio_fields=None):
+    e = dict(id=id_, name=name, aliases=aliases, bodyPart=part, muscles=muscles, secondary=secondary,
+             equipment=equipment, instructions=instructions, timed=timed, type=type_)
+    if cardio_fields:
+        e["cardioFields"] = cardio_fields
+    E.append(e)
 
 PET, DOR, SPA, BIC, TRI = "Petto", "Schiena", "Spalle", "Bicipiti", "Tricipiti"
 QUA, FEM, GLU, POL, CORE, CARD = "Quadricipiti", "Femorali", "Glutei", "Polpacci", "Core", "Corpo intero/Cardio"
@@ -494,6 +500,9 @@ ex("crunch-bicicletta", "Crunch a bicicletta", ["Bicycle crunch", "Bicicletta"],
 ex("flessioni-laterali-manubrio", "Flessioni laterali con manubrio", ["Side bend", "Piegamenti laterali"], CORE,
    ["Obliqui"], ["Quadrato dei lombi"], "manubri",
    "In piedi con un manubrio in una mano. Piegati di lato verso il peso e risali contraendo il fianco opposto, poi cambia lato.")
+ex("dead-hang", "Dead hang", ["Sospensione alla sbarra", "Appeso alla sbarra", "Hang"], CORE,
+   ["Avambracci", "Gran dorsale"], ["Spalle", "Trasverso dell'addome"], "corpo libero",
+   "Afferra la sbarra con le mani alla larghezza delle spalle e lasciati appendere a braccia tese, piedi staccati da terra. Tieni le spalle attive, senza farle salire alle orecchie, e resta appeso per il tempo previsto.", True)
 ex("l-sit", "L-sit", ["Squadra alle parallele"], CORE,
    ["Retto addominale", "Flessori dell'anca"], ["Tricipite", "Quadricipite"], "corpo libero",
    "Sulle parallele o a terra con le mani accanto ai fianchi, sollevati e tieni le gambe tese parallele al pavimento. Resta fermo per il tempo previsto.", True)
@@ -508,9 +517,14 @@ ex("jumping-jack", "Jumping jack", ["Salti a stella", "Jumping jacks"], CARD,
 ex("salto-corda", "Salto della corda", ["Jump rope", "Corda"], CARD,
    ["Polpacci"], ["Quadricipite", "Spalle"], "altro",
    "Gira la corda con i polsi tenendo i gomiti vicino ai fianchi. Salta poco, sugli avampiedi, quanto basta per far passare la corda.")
-ex("tapis-roulant", "Corsa sul tapis roulant", ["Tapis roulant", "Treadmill", "Corsa"], CARD,
+ex("tapis-roulant", "Corsa su tapis roulant", ["Corsa sul tapis roulant", "Tapis roulant", "Treadmill", "Corsa", "Treadmill run"], CARD,
    ["Corpo intero"], ["Quadricipite", "Polpacci", "Femorali"], "macchina",
-   "Inizia camminando e aumenta gradualmente la velocità. Corri con passi corti e busto dritto, senza aggrapparti ai corrimano.")
+   "Inizia camminando e aumenta gradualmente la velocità. Corri con passi corti e busto dritto, senza aggrapparti ai corrimano; registra durata, velocità e pendenza di ogni blocco.",
+   type_="cardio", cardio_fields=CARDIO_FIELDS["tapis roulant"])
+ex("camminata-inclinata-tapis-roulant", "Camminata inclinata su tapis roulant", ["Incline walk", "Camminata in salita", "Camminata in pendenza"], CARD,
+   ["Grande gluteo", "Polpacci"], ["Femorali", "Quadricipite"], "macchina",
+   "Imposta una pendenza alta e una velocità da camminata sostenuta. Cammina a passo regolare con il busto dritto, senza aggrapparti ai corrimano.",
+   type_="cardio", cardio_fields=CARDIO_FIELDS["tapis roulant"])
 ex("cyclette", "Cyclette", ["Bici da camera", "Spinning", "Bike"], CARD,
    ["Quadricipite"], ["Grande gluteo", "Polpacci"], "macchina",
    "Regola la sella in modo che la gamba sia quasi tesa nel punto più basso. Pedala con ritmo regolare scegliendo una resistenza che ti permetta di parlare a fatica.")
@@ -579,6 +593,10 @@ def check():
         ids.add(e["id"])
         if e["bodyPart"] not in BODY_PARTS:
             errors.append(f"{e['id']}: parte del corpo sconosciuta {e['bodyPart']}")
+        if e["type"] not in TYPES:
+            errors.append(f"{e['id']}: tipo sconosciuto {e['type']}")
+        if (e["type"] == "cardio") != ("cardioFields" in e) or ("cardioFields" in e and e["cardioFields"] not in CARDIO_FIELDS.values()):
+            errors.append(f"{e['id']}: cardioFields non validi")
         if e["equipment"] not in EQUIPMENT:
             errors.append(f"{e['id']}: attrezzo sconosciuto {e['equipment']}")
         sentences = [x for x in re.split(r"(?<=[.!?])\s+", e["instructions"].strip()) if x]
@@ -601,6 +619,7 @@ if __name__ == "__main__":
         "license": "Testi scritti per Diario Palestra; liberi da usare e modificare in questo progetto.",
         "bodyParts": BODY_PARTS,
         "equipment": EQUIPMENT,
+        "types": TYPES,
         "exercises": E,
     }
     OUT.parent.mkdir(exist_ok=True)
@@ -613,4 +632,4 @@ if __name__ == "__main__":
     print(f"{len(E)} esercizi scritti in {OUT}")
     for p, n in counts.items():
         print(f"  {p}: {n}")
-    print(f"  (a tempo: {sum(1 for e in E if e['timed'])})")
+    print(f"  (a tempo: {sum(1 for e in E if e['timed'])}, cardio: {[e['id'] for e in E if e['type'] == 'cardio']})")

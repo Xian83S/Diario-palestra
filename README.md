@@ -85,6 +85,37 @@ Il codice è già su GitHub, quindi questa è la strada più breve. L'indirizzo 
 3. Esegui `python3 tools/build-library.py`. Lo script controlla che id e alias siano unici, che parti del corpo e attrezzi siano tra quelli ammessi e che le istruzioni abbiano 2-3 frasi, poi riscrive `data/esercizi.json`.
 4. Aumenta `VERSION` in `sw.js`.
 
+## Cardio su tapis roulant
+
+- In libreria ci sono **Corsa su tapis roulant** e **Camminata inclinata su tapis roulant** (Corpo intero/Cardio). Ogni esercizio ha un `type`: `strength` (forza, il predefinito) o `cardio`; per il cardio `cardioFields` dice quali campi usa la macchina (tapis roulant: durata, velocità, pendenza). Altre macchine si potranno aggiungere con un loro elenco di campi.
+- **Crea esercizio personalizzato** chiede il tipo: Forza oppure Cardio (tapis roulant). Il tipo non si cambia dopo la creazione.
+- **Durante l'allenamento** ogni "serie" cardio è un blocco: Durata (min, anche decimale), Velocità (km/h), Pendenza (%) e la spunta "fatto". Su iPhone il blocco sta su due righe: durata, **Avvia** e spunta sopra; velocità e pendenza con − e + sotto. "+ Blocco" copia il blocco precedente (intervalli).
+  - Limiti: velocità 0–30 km/h, pendenza 0–30 %, durata maggiore di 0.
+  - Passo dei pulsanti in **Storico → Impostazioni**: "Passo velocità" 0,1 o 0,5 km/h (predefinito 0,5) e "Passo pendenza" 0,5 o 1 % (predefinito 0,5).
+  - **Avvia** fa partire il conto alla rovescia della durata del blocco (calcolato dall'ora di fine, come gli altri timer), suona alla fine e segna il blocco come fatto. Dopo un blocco cardio non parte il recupero.
+  - Sotto i blocchi: "Totale: 30 min · 4,3 km · 8,6 km/h medi". Distanza del blocco = velocità × durata / 60; velocità media = distanza totale / ore totali. La distanza è stimata dai valori inseriti.
+  - La copia automatica del peso non riguarda il cardio. Note e "Ripeti ultimo" funzionano come per la forza.
+- **Schede:** per un esercizio cardio l'editor mostra i blocchi previsti (aggiungi, elimina, "Copia dal precedente"); l'allenamento si precompila da lì.
+- **Volume e record di peso** contano solo la forza (riepilogo, "Ultima volta", Storico). Una sessione solo cardio mostra durata e distanza; una mista mostra entrambe.
+- **Storico:** un blocco per riga, "30 min · 8,5 km/h · 2%". **Progressi:** per il cardio i grafici sono Distanza, Durata e Velocità media; i riquadri mostrano distanza massima, durata massima, miglior velocità media e numero di sessioni.
+- Il cardio ha uno storico separato dalla forza: un vecchio "Tapis roulant" registrato con kg e ripetizioni resta com'era, come esercizio di forza.
+
+## Note per esercizio
+
+- Durante l'allenamento, sotto il nome di ogni esercizio c'è la riga **Nota**: "+ Aggiungi nota" se è vuota, altrimenti il testo (al massimo 2 righe a vista).
+- Un tocco apre un campo su più righe, che si salva da solo quando esci. "Cancella nota" la svuota.
+- Toccando un campo kg o ripetizioni la nota si chiude e la tastiera numerica resta.
+- La nota si ripropone la volta dopo per lo stesso esercizio: avviando la scheda, con "Ripeti ultimo" e con "Aggiungi esercizio".
+- La nota compare nello **Storico**, sotto l'esercizio, e in **Progressi → Ultime sessioni**, accanto alla data. È inclusa nei backup; quelli vecchi si importano con la nota vuota.
+
+## Copia del peso alle serie successive
+
+- Durante l'allenamento, quando cambi i kg di una serie, le serie successive **non ancora fatte** che avevano lo stesso peso di prima prendono il nuovo valore. Quelle con un peso diverso (piramidi, riscaldamento) non cambiano.
+- Cambia solo il peso, mai le ripetizioni. Con − e + la copia è immediata. Scrivendo a mano avviene quando esci dal campo o premi invio.
+- Riguarda solo l'allenamento in corso, non la scheda né lo storico.
+- Le serie aggiornate lampeggiano per mezzo secondo (senza animazione se il telefono è impostato su "Riduci movimento").
+- Si disattiva in **Storico → Impostazioni → Copia il peso alle serie successive** (acceso di default). L'impostazione è inclusa nel backup.
+
 ## Ripeti ultimo allenamento
 
 - In **Oggi** ogni scheda ha due pulsanti:
@@ -118,6 +149,8 @@ Limiti di iPhone da sapere:
 ## Timer per esercizi a tempo (plank, isometrie)
 
 - In **Schede**, per ogni esercizio, c'è l'interruttore **Timer** (spento di default). Se lo accendi compare **Durata (secondi)**.
+- Lo stesso interruttore c'è anche nel dettaglio del selettore (prima di **Aggiungi**), sia per le schede sia durante l'allenamento, e su ogni esercizio dell'allenamento in corso (**Timer esercizio**). Quest'ultimo vale solo per quell'allenamento e non modifica la scheda.
+- Gli esercizi della libreria segnati "a tempo" partono con il timer acceso a 30 secondi; tutti gli altri partono spenti, ma l'interruttore c'è sempre.
 - Durante l'allenamento, se il timer è acceso e la durata è maggiore di 0, ogni serie di quell'esercizio mostra **Avvia timer**. Con il timer spento o con durata 0 non compare nessun pulsante.
 - Alla fine del conto alla rovescia l'app suona, segna la serie come fatta e fa partire subito il recupero dell'esercizio.
 - **Ferma timer** interrompe il conto senza segnare la serie.
@@ -148,6 +181,7 @@ Il formato dei dati ha un numero di versione (`Model.DATA_VERSION` in `model.js`
 - **Versione 1:** ogni esercizio di una scheda aveva `sets`, `reps` e `weight` unici (es. 4 serie da 8 a 60 kg).
 - **Versione 2:** ogni serie ha le proprie ripetizioni e il proprio peso: `sets: [{reps: 10, weight: 55}, {reps: 8, weight: 60}, …]`, più il recupero `rest` in secondi.
 - **Versione 3:** ogni esercizio ha anche `timer: {enabled, seconds}` per gli esercizi a tempo. Per le schede esistenti vale `{enabled: false, seconds: 30}`.
+- **Versione 7:** ogni esercizio delle sessioni (e dell'allenamento in corso) ha `note`, al massimo 500 caratteri; i dati vecchi hanno nota vuota. Ogni esercizio di schede, sessioni, allenamento in corso e personalizzati ha `type` (`strength` per tutti i dati vecchi, oppure `cardio` con blocchi `{minutes, speedKmh, inclinePct, done}`). Prima della conversione si salva una copia delle sessioni (`diarioPalestra.sessions.v6`).
 - **Versione 6:** ogni esercizio di schede e sessioni ha `exerciseId` (id della libreria oppure `custom-…`) più `name`, cioè il nome al momento. Nuova raccolta `customExercises` per gli esercizi personalizzati. Vedi "Libreria esercizi" più sotto.
 - **Versione 5:** impostazioni `settings: {weightStep}`, cioè il passo dei pulsanti − e + dei kg (1, 2,5 o 5; predefinito 2,5). Sono incluse nei backup.
 - **Versione 4:** nuova raccolta `bodyWeights` per il peso corporeo, `[{id, date, kg, createdAt}]`, con al massimo una registrazione per data. Viene inclusa nei backup.
@@ -173,7 +207,8 @@ Il service worker funziona solo su `https://` oppure su `localhost`. Aprire dire
 ## Regole di calcolo
 
 - **1RM stimato** (formula di Epley): `kg × (1 + ripetizioni / 30)`. Con 1 ripetizione vale `kg`.
-- **Volume**: somma di `kg × ripetizioni`.
+- **Volume**: somma di `kg × ripetizioni` (solo esercizi di forza).
+- **Cardio**: distanza del blocco (km) = `velocità × durata / 60`; velocità media = distanza totale / ore totali.
 - **Nuovo record**: c'è solo se il peso massimo supera il massimo precedente dello stesso esercizio. La prima volta che fai un esercizio non conta come record.
 - Gli esercizi si confrontano per nome, senza distinguere maiuscole e minuscole e ignorando gli spazi all'inizio e alla fine.
 - Quando termini l'allenamento vengono salvate solo le serie segnate come fatte, con kg ≥ 0 e almeno 1 ripetizione.
